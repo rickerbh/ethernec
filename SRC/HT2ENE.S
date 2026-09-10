@@ -79,7 +79,7 @@ ne_probe
 		getBUS	NE_RESET,d1
 		putBUS	d1,NE_RESET
 
-		move	10000,d0		; wait 2ms
+		move	#60000,d0		; wait (was `move 10000,d0` = abs.addr read, a bug); enlarged for fast TT bus
 .t1		dbra	d0,.t1
 
 
