@@ -1,0 +1,4 @@
+# Linux cross-build working tree (not part of upstream sources)
+/build/
+/.tools/
+/.devbox/

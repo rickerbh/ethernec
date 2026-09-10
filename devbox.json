@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.13.7/.schema/devbox.schema.json",
+  "packages": [
+    "gcc@latest",
+    "gnumake@latest",
+    "coreutils@latest",
+    "curl@latest",
+    "cacert@latest"
+  ],
+  "shell": {
+    "init_hook": [
+      "export PATH=\"$PWD/.tools/bin:$PATH\"",
+      "if [ ! -x \"$PWD/.tools/bin/vasmm68k_mot\" ]; then bash tools/build-tools.sh; fi"
+    ],
+    "scripts": {
+      "build-tools": "bash tools/build-tools.sh",
+      "rebuild-tools": "bash tools/build-tools.sh --force"
+    }
+  }
+}
