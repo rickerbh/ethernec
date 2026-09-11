@@ -105,6 +105,8 @@ test3		jsr	ei_probe1
 		beq.b	.c1
 		cmp.b	#'t',d0
 		beq.b	.c2
+		cmp.b	#'d',d0
+		beq.b	.c3
 		bra.b	.t1
 
 .c1		jsr	ei_interrupt
@@ -117,7 +119,39 @@ test3		jsr	ei_probe1
 		jsr	ei_start_xmit
 		bra.b	.t1
 
-		
+* 'd': dump 8390 chip registers for diagnosis
+.c3		cacheOff
+		ldBUSRegs
+		PrA	<"CMD ">
+		getBUS	E8390_CMD,d1
+		PrB	d1
+		PrA	<" ISR ">
+		getBUS	EN0_ISR,d1
+		PrB	d1
+		PrA	<" TSR ">
+		getBUS	EN0_TSR,d1
+		PrB	d1
+		PrA	<" NCR ">
+		getBUS	EN0_NCR,d1
+		PrB	d1
+		PrA	<" CRDA ">
+		getBUS	EN0_CRDAHI,d1
+		PrB	d1
+		getBUS	EN0_CRDALO,d1
+		PrB	d1
+		PrA	<" BNRY ">
+		getBUS	EN0_BOUNDARY,d1
+		PrB	d1
+		putBUS	#E8390_NODMA+E8390_PAGE1+E8390_START,E8390_CMD
+		PrA	<" CUR ">
+		getBUS	EN1_CURPAG,d1
+		PrB	d1
+		putBUS	#E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
+		PrA	<13,10>
+		cacheOn
+		bra	.t1
+
+
 .quit		jsr	ei_close
 		rts
 
