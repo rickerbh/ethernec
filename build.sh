@@ -41,6 +41,14 @@ done
 sed -E "$SECFIX" "$SRC/$BUS_VARIANT" > "$BUILD/BUS.I"
 echo "bus variant: $BUS_VARIANT   cpu: $CPU"
 
+# DEBUG=1: enable the driver's built-in debug printouts (DEVSWIT.I levels)
+if [ -n "${DEBUG:-}" ]; then
+    sed -i -E 's/^(RXDEBPRT[[:space:]]+EQU[[:space:]]+)0/\14/;
+               s/^(TXDEBPRT[[:space:]]+EQU[[:space:]]+)0/\14/;
+               s/^(MACAddDEBPRT[[:space:]]+EQU[[:space:]]+)0/\11/' "$BUILD/DEVSWIT.I"
+    echo "debug:       RX/TX printout level 4, MAC PROM dump on"
+fi
+
 VASMBASE="vasmm68k_mot $CPU -devpac -quiet -I $BUILD"
 VASM="$VASMBASE -Ftos"
 
