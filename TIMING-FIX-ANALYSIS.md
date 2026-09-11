@@ -97,48 +97,56 @@ probe, with *no* other change, read the **correct MAC** on the TT and a clean IS
 
 ---
 
-## 6. The fix (`BUSENEC3.I`)
+## 6. Second finding — alignment-dependent first-access timing (confirmed)
 
-Bracket every cartridge access block with a data-cache disable/enable:
+With the data cache handled, results became **build-dependent**: binaries whose probe
+bodies were *byte-identical* (verified by instruction-level diff) behaved consistently
+differently — one read the MAC perfectly, others returned a *constant* junk byte
+(`$31`, `$30`, `$00`), each binary consistent with itself. The only physical difference
+was code placement (a 2–4 byte shift from differing prologues).
 
-- `ldBUSRegs` → `cacheDataOff`: `movec CACR,d0` / `and.w #$FEFF,d0` (clear ED) / `movec`.
-- `deselBUS`  → `cacheDataOn` : `movec CACR,d0` / `or.w #$0100,d0` (set ED) / `movec`.
+The key observation: in the PROM read loop, iterations 2+ run warm from the I-cache and
+are identical across builds — yet entire reads were junk. A constant from a repeatedly
+read data port means the RTL8019's remote-DMA engine **wedged at the first mis-timed
+access** and returned the same byte forever after. Whether the *first* accesses are clean
+depends on how instruction fetches interleave with the ISA cycles — i.e. code-alignment
+luck.
 
-`cacheDataOff` clears ED **and** sets CD (clear data cache); `cacheDataOn` sets ED.
-Properties:
+Supporting evidence:
+- Disabling the instruction cache too (Lance-style `$fefe`) made it **worse** (constant
+  `$00`, occasional crash): then *every* access has fetches interleaved, wedging the chip
+  immediately. So the I-cache must stay ON.
+- The very first nop-padding sweep (§4) failed only because the data cache was still
+  enabled at the time — the pads never reached the hardware. That test was invalid, not
+  the idea.
 
-- **Data cache only.** No driver code lives in the cartridge window, so the instruction
-  cache is left enabled.
-- **Clear on entry is required.** While the data cache is disabled the driver still writes
-  RAM (stack, packet buffers); those writes do not update existing cache lines, so any line
-  cached *before* the block goes stale, and re-enabling the cache then serves stale data —
-  wrong packet bytes, and stale **stack** lines causing intermittent crashes (observed on
-  the TT as 3-bomb address errors). Clearing the data cache when we disable it drops those
-  lines so the re-enabled cache refills cleanly from memory. (This is where the Lance
-  driver's simpler enable-only toggle was not enough for this test path.)
-- **68020+/030 only.** This is the `*3` bus variant; `movec` is always legal here. The
-  plain 68000 `BUSENEC.I` variant has no data cache and is untouched.
-- `d0` is preserved, so the macros are safe to invoke from the existing bracket points.
+## 7. The validated fix (`BUSENEC3.I`) — both parts, together
 
-Runs in supervisor mode (the driver's context; `movec` is privileged) — same assumption
-the Lance driver makes.
+1. **`cacheOff` / `cacheOn`** at driver-entry / exit:
+   `cacheOff` = `movec CACR,d0` / push / `bclr #8` (ED off) / `bset #11` (CD, clear) /
+   `movec` — saves the caller's CACR on the stack; `cacheOn` pops and restores it.
+   - Clearing on disable is required: RAM writes made while the cache is off don't update
+     pre-existing lines, which are then served stale on re-enable (wrong data + 3-bomb
+     crashes from stale stack lines).
+   - Instruction cache deliberately left on (see §6).
+2. **`RECOVER`** — `NE_RECOVER` nops (default 4) after every `getBUS`/`getMore`/`putBUS`/
+   `putMore`/`putBUSi`, so the gap between ISA cycles never depends on alignment.
 
-## 7. Cost & a possible optimisation
+**Hardware validation (Atari TT, NetUSBee, cold boots):** pads of 2, 4 and 8 nops — three
+different code alignments — all read the correct MAC consistently; the unpadded build only
+worked at one lucky alignment. A pad-0 build of the refactored macros is byte-identical to
+the proven lucky binary, confirming the refactor introduced no drift.
 
-Cost: one data-cache clear per access block. On the idle 200 Hz poll (which only reads
-ISR and returns) the clear is wasted work and leaves the cache cold. This is correct but
-not free. Two levers if it matters after real-world testing:
+Residual watch item: two startup-time crashes at pads 2 and 8 during BIOS text output
+(inside the cache-off window) which subsided on subsequent runs. The real driver performs
+no BIOS calls inside its cache-off windows; watch during TX/RX testing.
 
-- Only clear on the paths that write RAM with the cache off (receive/transmit), not on the
-  empty poll — the empty poll creates no stale lines.
-- The "proper" fix: mark just the `$FA0000`–`$FBFFFF` page cache-inhibited in the MMU page
-  table, so RAM stays cached and no per-block toggling/clearing is needed at all. More
-  invasive (touches OS MMU state) — revisit only if the simple version's cost shows up.
-
----
+Open point for the driver port: `NE2RAM` uses `movep.l`, which issues 4 back-to-back ISA
+reads within one instruction — software pads cannot go between them. If movep bursts also
+wedge the chip on the TT, the bulk-read path must switch to padded single-byte reads
+(the `BUS.I`-Hades style loop) on fast machines.
 
 ## 8. Not needed
 
 - **No change to the STinG core** — the fix is entirely in the EtherNEC driver.
-- **No migration to Pure C** — the fix is a few lines of assembler in one bus include.
-- **No inter-access delays** — the timing theory was disproven on hardware.
+- **No migration to Pure C** — the fix is assembler in one bus include.

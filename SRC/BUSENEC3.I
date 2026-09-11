@@ -79,53 +79,87 @@ RdBUS		EQUR	a6
 
 
 ldBUSRegs	MACRO				; for faster access to hardware
-		cacheDataOff			; keep the cartridge ROM window out of the 68030 data cache
 		lea	rom3,RcBUS
 		lea	rom4,RdBUS
 		ENDM
 
 
 *
-* 68030 data-cache handling for the cartridge port.
+* 68030 cache handling for the cartridge port.
 *
 * The EtherNEC data/register ports are decoded in the cartridge ROM window
-* ($FA0000/$FB0000). ROM space is cacheable, so on a 68030 (TT, Falcon) the
-* data cache satisfies repeated reads of the fixed data-port address from its
-* first value: the remote-DMA pointer never advances and every read returns the
-* same byte (observed on the TT as a constant $3e MAC). Inter-access delay does
-* not help -- a cache hit ignores timing.
+* ($FA0000/$FB0000). ROM space is cacheable, so on a 68030 (TT, Falcon):
 *
-* Fix: disable the 68030 data cache (CACR bit 8, ED) for each cartridge access
-* block and re-enable it on the way out, bracketed by ldBUSRegs / deselBUS which
-* every driver entry point already calls. This mirrors STinG's Lance driver
-* (cache_off / cache_on). Only the data cache is touched (no driver code lives
-* in the cartridge window, so the instruction cache is left alone) and the cache
-* is never flushed, so the cost is negligible.
+* 1) The DATA cache satisfies repeated reads of the fixed data-port address from
+*    its first value -- the remote-DMA pointer never advances and every read
+*    returns the same byte (observed on the TT as a constant $3e MAC). A data
+*    cache hit ignores timing, so inter-access delay cannot help.
 *
-* This is the 68020+/030 bus variant, so movec is always legal here; the plain
-* 68000 BUSENEC.I variant has no data cache and needs none of this. d0 is
-* preserved, so the macros are safe to invoke from anywhere.
+* 2) With the data cache off but the INSTRUCTION cache on, the tight read loop
+*    still runs at cache-hit speed, and the exact timing of the back-to-back
+*    data-port reads then depends on where the loop lands in the I-cache. On the
+*    TT that margin decides whether the RTL8019 has presented the next byte in
+*    time: two builds differing only in code alignment read the MAC correctly vs.
+*    return junk. So there is a residual read-recovery sensitivity once the data
+*    cache no longer masks it.
 *
-CACR_ED		EQU	$0100			; CACR bit 8: Enable Data cache
-CACR_NED	EQU	$feff			; mask to clear ED (low word)
-CACR_CD		EQU	$0800			; CACR bit 11: Clear Data cache (self-clearing)
-
-cacheDataOff	MACRO
-		move.l	d0,-(sp)
+* Fix (two parts, both needed):
+* - disable + clear the DATA cache around each cartridge access block, so reads
+*   reach the bus at all (clearing is required: RAM writes made while the cache
+*   is disabled do not update pre-existing lines, which would then be served
+*   stale on re-enable -- seen as wrong data and 3-bomb crashes from stale stack
+*   lines). The instruction cache is deliberately left on: disabling it makes
+*   things worse (every ISA access then has instruction fetches interleaved).
+* - pad each access with a recovery gap (RECOVER below), so first-access timing
+*   does not depend on alignment luck.
+*
+* Call cacheOff at the top of an entry point *before* acquiring the bus and
+* cacheOn after releasing it. This is the 68020+/030 bus variant, so movec is
+* always legal here; the plain 68000 BUSENEC.I variant has no caches and needs
+* none of this.
+*
+* cacheOff saves the caller's CACR on the stack; cacheOn restores it. The pair
+* must bracket a region with balanced stack use, and d0 is clobbered (as in the
+* proven HT2 test). Only the data cache is disabled (ED, bit 8) and cleared
+* (CD, bit 11); the instruction cache stays on -- disabling it makes things
+* worse on the TT (every ISA access then has instruction fetches interleaved).
+*
+cacheOff	MACRO
 		movec	CACR,d0
-		and.w	#CACR_NED,d0		; ED = 0 : bypass the data cache
-		or.w	#CACR_CD,d0		; CD = 1 : drop existing lines, else RAM writes
-						;          made while disabled leave stale entries
+		move.l	d0,-(sp)		; save caller's CACR
+		bclr	#8,d0			; ED=0 : disable data cache
+		bset	#11,d0			; CD=1 : clear data cache
 		movec	d0,CACR
-		move.l	(sp)+,d0
 		ENDM
 
-cacheDataOn	MACRO
-		move.l	d0,-(sp)
-		movec	CACR,d0
-		or.w	#CACR_ED,d0		; ED = 1 : re-enable the data cache
-		movec	d0,CACR
+cacheOn		MACRO
 		move.l	(sp)+,d0
+		movec	d0,CACR			; restore caller's CACR
+		ENDM
+
+
+*
+* Per-access recovery pad.
+*
+* Even with the data cache off, whether the RTL8019 tolerates the ISA cycles
+* depends on how closely they follow each other -- which back-to-back access
+* macros and (on the first, uncached loop iteration) instruction-fetch
+* interleaving decide. A first mis-timed /IOR wedges the chip's remote-DMA
+* state machine and every subsequent read returns a constant. Pad after every
+* access so the gap to the next one never depends on code alignment.
+* NE_RECOVER = number of nops (~62ns each at 32MHz); default 4, override with
+* vasm -DNE_RECOVER=<n>. 0 = no pad.
+*
+	IFND	NE_RECOVER
+NE_RECOVER	EQU	4
+	ENDC
+
+RECOVER		MACRO
+	IFNE	NE_RECOVER
+		REPT	NE_RECOVER
+		nop
+		ENDR
+	ENDC
 		ENDM
 
 
@@ -137,11 +171,13 @@ putBUS		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
+		RECOVER
 		ENDM
 
 
 putBUSi		MACRO
 		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
+		RECOVER
 		ENDM
 
 
@@ -152,23 +188,26 @@ putMore		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
+		RECOVER
 		ENDM
 
 
 getBUS		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
+		RECOVER
 		ENDM
 
 
 getMore		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
+		RECOVER
 		ENDM
 
 *
 * macro to deselect an interface
 *
 deselBUS	MACRO
-		cacheDataOn			; restore the data cache on the way out
+* empty as the cartridge port does not need deselecting
 		ENDM
 
 

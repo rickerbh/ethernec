@@ -71,8 +71,9 @@ myStart		move.l	4(sp),a0		; get pointer to basepage
 NBSA_prom	EQU	32
 
 ne_probe
+		cacheOff			; disable+clear 68030 data cache before touching the card
 		lockBUSWait			; aquire Bus
-		ldBUSRegs			; prepare registers (also disables the data cache on 030)
+		ldBUSRegs			; prepare registers
 
 		PrS	.head1(pc)
 
@@ -146,8 +147,9 @@ ne_probe
 		PrS	AnyKey(pc)
 		WaitKey
 	ENDC
-		deselBUS			; deselect Bus interface (also re-enables the data cache)
+		deselBUS			; deselect Bus interface
 		unlockBUSWait			; relinquish Bus
+		cacheOn			; re-enable the data cache
 		rts
 
 
