@@ -1264,9 +1264,13 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		getBUS	NE_RESET,d1
 		putBUS	d1,NE_RESET
 
-*		move.l	ticks2ms(RprDVS),d0	; wait 2ms
-		moveq	#2,d1			; wait 5-10ms maximum
-		bsr	ADelay			; (was bsr.b; RECOVER pads pushed it out of byte range)
+* ~2ms is enough for the RST bit to set but NOT enough before the RTL8019
+* accepts remote-DMA on a TT: the PROM then reads back junk. Wait ~16ms
+* (proven on real TT hardware; matches the HT2 test program).
+		move.l	ticks2ms(RprDVS),d0
+		lsl.l	#3,d0			; 8 x 2ms = ~16ms in calibrated units
+		moveq	#6,d1			; 15-30ms cap via _hz_200
+		bsr	ADelay
 
 		getBUS	EN0_ISR,d1		; read isr
 		and.b	#ENISR_RESET,d1		; test for reset bit
@@ -1404,13 +1408,14 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 * 8390 reset command required, but that shouldn't be necessary
 *********************************************************************************
 
-ne_reset_8390	
+ne_reset_8390
 * DON'T change these to inb_p/outb_p or reset will fail on clones
 		getBUS	NE_RESET,d1
 		putBUS	d1,NE_RESET
 
-		move.l	DVS+ticks2ms,d0		; wait 2ms
-		moveq	#2,d1			; wait 5-10ms maximum (irrelevant here)
+		move.l	DVS+ticks2ms,d0		; ~16ms, see ei_probe1: 2ms is not
+		lsl.l	#3,d0			; enough on a TT before the chip is usable
+		moveq	#6,d1			; 15-30ms cap
 		bsr	ADelay
 
 * This check _should_not_ be necessary, omit eventually
