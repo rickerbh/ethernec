@@ -170,6 +170,16 @@ RECOVER		MACRO
 		ENDM
 
 
+* Pin the next instruction to addr%4==2 (cartridge reads fail at %4==0,
+* hardware-verified 6/6). vasm fills CNOP with zeros, which must never be
+* executed (a 2- or 6-byte pad decodes as garbage), so branch over the pad.
+PIN24		MACRO
+		bra.b	.pin\@
+		CNOP	2,4
+.pin\@
+		ENDM
+
+
 *
 * Writes ("write by reading" ROM3) carry the data on cartridge address lines
 * A1-A8. On the TT the lines do not settle to the new value before the write
@@ -330,7 +340,7 @@ NE2RAM		MACRO
 		ror.l	#4,\2			; store remainder in upper word
 		bra	.Nb1\@
 
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 .Nt1\@		movep.l	NE_DATAPORT<<9(RdBUS),d0	; four bytes at once
 		move.l	d0,(\1)+
 		movep.l	NE_DATAPORT<<9(RdBUS),d0
@@ -347,7 +357,7 @@ NE2RAM		MACRO
 		rol.l	#3,\2				; restore remainder bits
 		bra	.Nb2\@
 
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 .Nt2\@		movep.w	NE_DATAPORT<<9(RdBUS),d0
 		move.w	d0,(\1)+
 .Nb2\@		dbra	\2,.Nt2\@

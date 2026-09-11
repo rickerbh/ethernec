@@ -89,6 +89,9 @@ cacheOff	MACRO
 cacheOn		MACRO
 		ENDM
 
+PIN24		MACRO			; no alignment pinning needed on this variant
+		ENDM
+
 putBUSDi	MACRO			; same as putBUSi on this bus variant
 		putBUSi	\1,\2
 		ENDM

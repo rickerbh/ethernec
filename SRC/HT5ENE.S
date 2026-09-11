@@ -94,7 +94,7 @@ test5		cacheOff
 		move.b	d3,RyBUS
 		tst.b	0(RcBUS,RyBUS.w*2)	; raw write
 		RECOVER
-		CNOP	2,4
+		PIN24
 		getBUS	EN0_BOUNDARY,d1
 		cmp.b	d3,d1
 		beq.b	.m1c1
@@ -111,7 +111,7 @@ test5		cacheOff
 .m2t1		move.b	(a2)+,d3
 		moveq	#NREPS-1,d2
 .m2t2		putBUSD	d3,EN0_BOUNDARY
-		CNOP	2,4
+		PIN24
 		getBUS	EN0_BOUNDARY,d1
 		cmp.b	d3,d1
 		beq.b	.m2c1
@@ -128,7 +128,7 @@ test5		cacheOff
 .m3t1		move.b	(a2)+,d3
 		moveq	#NREPS-1,d2
 .m3t2		putBUS	d3,EN0_BOUNDARY
-		CNOP	2,4
+		PIN24
 		getBUS	EN0_BOUNDARY,d1
 		cmp.b	d3,d1
 		beq.b	.m3c1
@@ -149,13 +149,13 @@ test5		cacheOff
 		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
 		putBUS	d3,EN1_CURPAG
 		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
-		CNOP	2,4
+		PIN24
 		getBUS	EN0_BOUNDARY,d1
 		cmp.b	d3,d1
 		beq.b	.a1c1
 		addq.w	#1,d5
 .a1c1		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
-		CNOP	2,4
+		PIN24
 		getBUS	EN1_CURPAG,d1
 		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
 		cmp.b	d3,d1
@@ -201,7 +201,7 @@ test5		cacheOff
 		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD
 		lea	dstBuf,a0
 		move	#NDMA-1,d2
-		CNOP	2,4
+		PIN24
 .d1t3		getBUS	NE_DATAPORT,d1
 		move.b	d1,(a0)+
 		dbra	d2,.d1t3

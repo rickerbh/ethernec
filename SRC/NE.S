@@ -405,7 +405,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 .t1		move	sr,d1			; save int. level
 		ori	#$700,sr		; disable all ints.
 	ENDC
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 		getBUS	EN0_ISR,RitInts		; look what is up
 	IFNE	PARANOIA
 		getMore	EN0_ISR,d0		; again to minimize spike risk
@@ -744,7 +744,7 @@ ei_receive	movem.l	Rrx,-(sp)			; save registers
 		move	sr,d1					; save status register
 		ori	#$700,sr				; disable all ints.
 	ENDC
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 .t0		getBUS	EN1_CURPAG,d0
 		move.b	d0,lcl_current_page(RitDVS)		; get the rx page (incoming packet pointer)
 	IFNE	PARANOIA
@@ -770,7 +770,7 @@ ei_receive	movem.l	Rrx,-(sp)			; save registers
 		putBUS	RrxReadPg,EN0_RSARHI
 		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD ; start remote DMA Read
 
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 		getBUS	NE_DATAPORT,d0
 		move.b	d0,rxHdrSts(sp)			; first: status byte
 		getMore	NE_DATAPORT,RrxNextFrm		; next:  next page
@@ -1306,7 +1306,7 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		move	#NBSA_prom/2-1,d2
 		lea	pbSA_prom(sp),a0
 
-		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
+		PIN24
 .t2		getBUS	NE_DATAPORT,d0
 		move.b	d0,(a0)+
 		getMore	NE_DATAPORT,d1
