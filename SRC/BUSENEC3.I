@@ -170,19 +170,37 @@ RECOVER		MACRO
 		ENDM
 
 
+*
+* Writes ("write by reading" ROM3) carry the data on cartridge address lines
+* A1-A8. On the TT the lines do not settle to the new value before the write
+* strobe latches them: all-ones data lost bits, all-zero data picked up bits
+* left over from the preceding (RAM fetch) bus cycle. Observed as every byte
+* of a transmitted frame scrambled while the byte COUNT stayed exact, and as
+* occasional single-bit register-write errors (CMD reading $23 after a $22
+* write). Inter-access delay cannot help; the violation is at the start of
+* the write cycle itself.
+*
+* Countermeasure: precondition the lines. Immediately before each ROM3 write,
+* read the chip's command register via ROM4 with the data value in A1-A8
+* (register select ignores A1-A8; reading CMD has no side effects). That
+* settles the data lines to their final state, so the real write only flips
+* the ROM3-select and register-select bits and the latch captures clean data.
+* Still exactly one write pulse per byte. The preconditioning read's own value
+* is discarded, so it needs no timing margin of its own.
+*
 putBUS		MACRO
 		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15
 		move.b	\1,RyBUS		; merge in data
-	IFND	__G2
+		moveq	#0,RxBUS
+		move.b	RyBUS,RxBUS		; isolate the data byte
+		tst.b	0(RdBUS,RxBUS.w*2)	; precondition A1-A8 (reads CMD, harmless)
 		tst.b	0(RcBUS,RyBUS.w*2)	; write by reading
-	ELSEIF
-		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
-	ENDC
 		RECOVER
 		ENDM
 
 
 putBUSi		MACRO
+		tst.b	((\1)&$ff)<<1(RdBUS)	; precondition A1-A8 (reads CMD, harmless)
 		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
 		RECOVER
 		ENDM
@@ -190,11 +208,10 @@ putBUSi		MACRO
 
 putMore		MACRO
 		move.b	\1,RyBUS		; merge in data
-	IFND	__G2
+		moveq	#0,RxBUS
+		move.b	RyBUS,RxBUS		; isolate the data byte
+		tst.b	0(RdBUS,RxBUS.w*2)	; precondition A1-A8 (reads CMD, harmless)
 		tst.b	0(RcBUS,RyBUS.w*2)	; write by reading
-	ELSEIF
-		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
-	ENDC
 		RECOVER
 		ENDM
 
