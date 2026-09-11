@@ -107,6 +107,8 @@ test3		jsr	ei_probe1
 		beq.b	.c2
 		cmp.b	#'d',d0
 		beq.b	.c3
+		cmp.b	#'s',d0
+		beq	.c4
 		bra.b	.t1
 
 .c1		jsr	ei_interrupt
@@ -149,6 +151,17 @@ test3		jsr	ei_probe1
 		putBUS	#E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
 		PrA	<13,10>
 		cacheOn
+		bra	.t1
+
+* 's': (re)start the chip -- recover from a half-latched CMD write
+.c4		cacheOff
+		ldBUSRegs
+		putBUS	#$ff,EN0_ISR
+		putBUS	#E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
+		putBUS	#E8390_TXCONFIG,EN0_TXCR
+		putBUS	#E8390_RXCONFIG,EN0_RXCR
+		cacheOn
+		PrA	<"started",13,10>
 		bra	.t1
 
 
