@@ -108,11 +108,14 @@ ldBUSRegs	MACRO				; for faster access to hardware
 *
 CACR_ED		EQU	$0100			; CACR bit 8: Enable Data cache
 CACR_NED	EQU	$feff			; mask to clear ED (low word)
+CACR_CD		EQU	$0800			; CACR bit 11: Clear Data cache (self-clearing)
 
 cacheDataOff	MACRO
 		move.l	d0,-(sp)
 		movec	CACR,d0
 		and.w	#CACR_NED,d0		; ED = 0 : bypass the data cache
+		or.w	#CACR_CD,d0		; CD = 1 : drop existing lines, else RAM writes
+						;          made while disabled leave stale entries
 		movec	d0,CACR
 		move.l	(sp)+,d0
 		ENDM

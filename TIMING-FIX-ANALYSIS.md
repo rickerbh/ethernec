@@ -104,14 +104,18 @@ Bracket every cartridge access block with a data-cache disable/enable:
 - `ldBUSRegs` → `cacheDataOff`: `movec CACR,d0` / `and.w #$FEFF,d0` (clear ED) / `movec`.
 - `deselBUS`  → `cacheDataOn` : `movec CACR,d0` / `or.w #$0100,d0` (set ED) / `movec`.
 
-Properties, chosen to match STinG's own Lance driver (`cache_off`/`cache_on`) and to keep
-it minimal:
+`cacheDataOff` clears ED **and** sets CD (clear data cache); `cacheDataOn` sets ED.
+Properties:
 
 - **Data cache only.** No driver code lives in the cartridge window, so the instruction
   cache is left enabled.
-- **No flush.** Only the ED enable bit is toggled; the cache is never cleared, so there is
-  no per-poll flush cost. The cartridge address never enters the cache (it is only ever
-  read with ED=0), so no stale cartridge line can exist.
+- **Clear on entry is required.** While the data cache is disabled the driver still writes
+  RAM (stack, packet buffers); those writes do not update existing cache lines, so any line
+  cached *before* the block goes stale, and re-enabling the cache then serves stale data —
+  wrong packet bytes, and stale **stack** lines causing intermittent crashes (observed on
+  the TT as 3-bomb address errors). Clearing the data cache when we disable it drops those
+  lines so the re-enabled cache refills cleanly from memory. (This is where the Lance
+  driver's simpler enable-only toggle was not enough for this test path.)
 - **68020+/030 only.** This is the `*3` bus variant; `movec` is always legal here. The
   plain 68000 `BUSENEC.I` variant has no data cache and is untouched.
 - `d0` is preserved, so the macros are safe to invoke from the existing bracket points.
@@ -119,14 +123,17 @@ it minimal:
 Runs in supervisor mode (the driver's context; `movec` is privileged) — same assumption
 the Lance driver makes.
 
-## 7. Open item to verify on hardware
+## 7. Cost & a possible optimisation
 
-Received-packet data is DMA-copied into a freshly `KRmalloc`'d STinG buffer while the data
-cache is disabled. If that buffer address happened to be cached with stale contents,
-re-enabling the cache could expose stale bytes. STinG's Lance driver has the identical
-structure and ships without flushing, so this is expected to be a non-issue — but it is the
-one thing to watch when testing real RX/TX. If it ever bites, the remedy is a targeted
-data-cache clear (CACR CD bit) in `cacheDataOn`.
+Cost: one data-cache clear per access block. On the idle 200 Hz poll (which only reads
+ISR and returns) the clear is wasted work and leaves the cache cold. This is correct but
+not free. Two levers if it matters after real-world testing:
+
+- Only clear on the paths that write RAM with the cache off (receive/transmit), not on the
+  empty poll — the empty poll creates no stale lines.
+- The "proper" fix: mark just the `$FA0000`–`$FBFFFF` page cache-inhibited in the MMU page
+  table, so RAM stays cached and no per-block toggling/clearing is needed at all. More
+  invasive (touches OS MMU state) — revisit only if the simple version's cost shows up.
 
 ---
 
