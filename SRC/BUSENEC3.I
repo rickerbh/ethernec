@@ -188,7 +188,38 @@ RECOVER		MACRO
 * Still exactly one write pulse per byte. The preconditioning read's own value
 * is discarded, so it needs no timing margin of its own.
 *
-putBUS		MACRO
+* REGISTER writes are additionally issued TWICE: the first write's strobe may
+* still mis-sample the register-select lines (A9-A13 / ROM3 select transition
+* at the strobe -- seen as config writes landing nowhere: TXCR/RXCR not taking
+* effect, leaving the chip in loopback/monitor after open). The second write
+* targets the identical full address, so every line is already settled and it
+* latches deterministically. All the driver's register sequences are idempotent
+* under an immediate doubled write (verified per site: stop/start/page switch,
+* DMA setup before any data transfer, TX trigger while TXP is ignored).
+* The DATA PORT must never be double-written (each pulse is a DMA transfer):
+* use putBUSD/putMore for it, which issue exactly one pulse.
+*
+putBUS		MACRO				; register write, doubled
+		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15
+		move.b	\1,RyBUS		; merge in data
+		moveq	#0,RxBUS
+		move.b	RyBUS,RxBUS		; isolate the data byte
+		tst.b	0(RdBUS,RxBUS.w*2)	; precondition A1-A8 (reads CMD, harmless)
+		tst.b	0(RcBUS,RyBUS.w*2)	; write by reading
+		tst.b	0(RcBUS,RyBUS.w*2)	; and again: identical address, settled lines
+		RECOVER
+		ENDM
+
+
+putBUSi		MACRO				; register write, immediate, doubled
+		tst.b	((\1)&$ff)<<1(RdBUS)	; precondition A1-A8 (reads CMD, harmless)
+		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
+		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; and again: identical address, settled lines
+		RECOVER
+		ENDM
+
+
+putBUSD		MACRO				; DATA PORT write: exactly one pulse
 		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15
 		move.b	\1,RyBUS		; merge in data
 		moveq	#0,RxBUS
@@ -199,14 +230,7 @@ putBUS		MACRO
 		ENDM
 
 
-putBUSi		MACRO
-		tst.b	((\1)&$ff)<<1(RdBUS)	; precondition A1-A8 (reads CMD, harmless)
-		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
-		RECOVER
-		ENDM
-
-
-putMore		MACRO
+putMore		MACRO				; DATA PORT write: exactly one pulse
 		move.b	\1,RyBUS		; merge in data
 		moveq	#0,RxBUS
 		move.b	RyBUS,RxBUS		; isolate the data byte
@@ -250,7 +274,7 @@ RAM2NE		MACRO
 		ext.l	\2			; clear upper word
 		subq.w	#2,\2			; first two puts are outside loop
 		ble	.doNothing\@		; nothing to do?
-		putBUS	(\1)+,NE_DATAPORT
+		putBUSD	(\1)+,NE_DATAPORT
 		putMore	(\1)+,NE_DATAPORT
 
 * put the packet; optimized for speed, we do 8 bytes at once
