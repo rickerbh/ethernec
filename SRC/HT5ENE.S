@@ -184,43 +184,37 @@ test5		cacheOff
 		bsr	prErrs
 
 * ---- remote-DMA loopback: write pattern to buffer RAM, read back ----
-* ---- remote-DMA read isolation ---------------------------------------------
-* The PROM probe reads fine with RREAD+START. The only things the loopback does
-* the probe never does: a network-START and a remote-WRITE before the read.
-* Isolate which breaks reads. dmaRead does its own RREAD+START and dmaHead
-* prints the first 4 bytes read.
+* ---- read discriminator: same loop, page 0 (PROM) vs page $40 (buffer) ------
+* If page-0 read returns the MAC but page-$40 returns a constant, buffer-RAM
+* remote-read is the problem. If BOTH are constant, this test's read loop/
+* alignment is broken (not the driver). Chip fresh + stopped, like the probe.
 		putBUSi	$ff,EN0_ISR
 
-* R1: fresh stopped chip, NO write -- read buffer RAM (like the probe).
-*     Expect varying bytes (SRAM power-up) = read path works.
-		PrA	<"R1 stop  no-wr rd: ">
+		PrA	<"page0 (MAC): ">
+		moveq	#0,d4			; RSARHI = 0
 		bsr	dmaRead
-		bsr	dmaHead
+		bsr	dmaHead8
 
-* R2: network-START, NO write, read. Does START alone break reads?
-		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
-		PrA	<"R2 start no-wr rd: ">
+		PrA	<"page40 buf : ">
+		moveq	#$40,d4			; RSARHI = $40
 		bsr	dmaRead
-		bsr	dmaHead
+		bsr	dmaHead8
 
-* R3: still started, WRITE (RDC-polled), then read.
+* write page $40 then read it back
 		moveq	#0,d4
 		bsr	dmaFill
+		moveq	#$40,d4
 		bsr	dmaWrite
-		PrA	<"R3 start wr    rd: ">
+		PrA	<"page40 wrrd: ">
 		bsr	dmaRead
-		bsr	dmaHead
-		PrA	<"   wrote        : ">
+		bsr	dmaHead8
+		PrA	<"   wrote   : ">
 		lea	srcBuf,a0
-		moveq	#3,d2
-.h3		PrB	(a0)+
-		PrA	<" ">
-		dbra	d2,.h3
-		PrS	crlf(pc)
+		bsr	head8raw
 		bra	dmaDone
 
-dmaHead		lea	dstBuf,a0
-		moveq	#3,d2
+dmaHead8	lea	dstBuf,a0
+head8raw	moveq	#7,d2
 .hh		PrB	(a0)+
 		PrA	<" ">
 		dbra	d2,.hh
@@ -237,11 +231,12 @@ dmaFill		lea	srcBuf,a0
 		rts
 
 dmaWrite	putBUSi	$ff,EN0_ISR
+		move.b	d4,d6			; save page
 		putBUSi	NDMA,EN0_RCNTLO
 		moveq	#0,d1
 		putBUS	d1,EN0_RCNTHI
 		putBUS	d1,EN0_RSARLO
-		putBUSi	$40,EN0_RSARHI
+		putBUS	d6,EN0_RSARHI
 		putBUSDi	E8390_RWRITE+E8390_START,E8390_CMD
 		lea	srcBuf,a0
 		move	#NDMA,d2
@@ -255,12 +250,13 @@ dmaWrite	putBUSi	$ff,EN0_ISR
 .wd2		putBUSi	ENISR_RDC,EN0_ISR
 		rts
 
-dmaRead		putBUSi	NDMA,EN0_RCNTLO
+dmaRead		move.b	d4,d6
+		putBUSi	NDMA,EN0_RCNTLO
 		moveq	#0,d1
 		putBUS	d1,EN0_RCNTHI
 		putBUS	d1,EN0_RSARLO
-		putBUSi	$40,EN0_RSARHI
-		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD	; exactly as the working probe
+		putBUS	d6,EN0_RSARHI
+		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD
 		lea	dstBuf,a0
 		move	#NDMA-1,d2
 		PIN24
