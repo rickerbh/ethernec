@@ -184,48 +184,48 @@ test5		cacheOff
 		bsr	prErrs
 
 * ---- remote-DMA loopback: write pattern to buffer RAM, read back ----
-* ---- remote-DMA loopback, three read variants -------------------------------
-* Writes always run STARTED (the only mode where they land). Reads always use
-* RREAD+START exactly like the (working) PROM probe. Variants differ in how the
-* remote-DMA engine is treated between the write and the read:
-* A: nothing (reproduces the wedged constant-byte readback)
-* B: STOP + settle + restart -- does stopping clear the engine?
-* C: RBCR:=0 'magic incantation' (Linux ne.c overrun recovery), no stop
+* ---- remote-DMA read isolation ---------------------------------------------
+* The PROM probe reads fine with RREAD+START. The only things the loopback does
+* the probe never does: a network-START and a remote-WRITE before the read.
+* Isolate which breaks reads. dmaRead does its own RREAD+START and dmaHead
+* prints the first 4 bytes read.
 		putBUSi	$ff,EN0_ISR
-		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
 
-		PrA	<"DMA-A plain errs: ">
+* R1: fresh stopped chip, NO write -- read buffer RAM (like the probe).
+*     Expect varying bytes (SRAM power-up) = read path works.
+		PrA	<"R1 stop  no-wr rd: ">
+		bsr	dmaRead
+		bsr	dmaHead
+
+* R2: network-START, NO write, read. Does START alone break reads?
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
+		PrA	<"R2 start no-wr rd: ">
+		bsr	dmaRead
+		bsr	dmaHead
+
+* R3: still started, WRITE (RDC-polled), then read.
 		moveq	#0,d4
 		bsr	dmaFill
 		bsr	dmaWrite
+		PrA	<"R3 start wr    rd: ">
 		bsr	dmaRead
-		bsr	dmaCmp
-		bsr	prErrs
-
-		PrA	<"DMA-B stop  errs: ">
-		moveq	#1,d4
-		bsr	dmaFill
-		bsr	dmaWrite
-		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
-		move.l	#20000,d1		; settle
-.dbw		subq.l	#1,d1
-		bne.b	.dbw
-		bsr	dmaRead			; RREAD+START restarts the chip
-		bsr	dmaCmp
-		bsr	prErrs
-
-		PrA	<"DMA-C rbcr0 errs: ">
-		moveq	#2,d4
-		bsr	dmaFill
-		bsr	dmaWrite
-		moveq	#0,d1			; Linux ne.c: reset RBCR0/1 as per
-		putBUS	d1,EN0_RCNTLO		; 'magic incantation' before reuse
-		putBUS	d1,EN0_RCNTHI
-		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
-		bsr	dmaRead
-		bsr	dmaCmp
-		bsr	prErrs
+		bsr	dmaHead
+		PrA	<"   wrote        : ">
+		lea	srcBuf,a0
+		moveq	#3,d2
+.h3		PrB	(a0)+
+		PrA	<" ">
+		dbra	d2,.h3
+		PrS	crlf(pc)
 		bra	dmaDone
+
+dmaHead		lea	dstBuf,a0
+		moveq	#3,d2
+.hh		PrB	(a0)+
+		PrA	<" ">
+		dbra	d2,.hh
+		PrS	crlf(pc)
+		rts
 
 dmaFill		lea	srcBuf,a0
 		move.b	d4,d3
@@ -236,7 +236,8 @@ dmaFill		lea	srcBuf,a0
 		dbra	d2,.f1
 		rts
 
-dmaWrite	putBUSi	NDMA,EN0_RCNTLO
+dmaWrite	putBUSi	$ff,EN0_ISR
+		putBUSi	NDMA,EN0_RCNTLO
 		moveq	#0,d1
 		putBUS	d1,EN0_RCNTHI
 		putBUS	d1,EN0_RSARLO
@@ -245,8 +246,13 @@ dmaWrite	putBUSi	NDMA,EN0_RCNTLO
 		lea	srcBuf,a0
 		move	#NDMA,d2
 		RAM2NE	a0,d2
-		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
-		putBUSi	ENISR_RDC,EN0_ISR
+		move.l	#100000,d3
+.wd1		getBUS	EN0_ISR,d1
+		btst	#6,d1
+		bne.b	.wd2
+		subq.l	#1,d3
+		bne.b	.wd1
+.wd2		putBUSi	ENISR_RDC,EN0_ISR
 		rts
 
 dmaRead		putBUSi	NDMA,EN0_RCNTLO
