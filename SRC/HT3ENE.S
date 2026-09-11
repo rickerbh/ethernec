@@ -100,7 +100,7 @@ test3		jsr	ei_probe1
 
 .t1		WaitKey
 		cmp.b	#'x',d0
-		beq.b	.quit
+		beq	.quit
 		cmp.b	#'r',d0
 		beq.b	.c1
 		cmp.b	#'t',d0
