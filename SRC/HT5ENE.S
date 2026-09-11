@@ -137,35 +137,57 @@ test5		cacheOff
 		dbra	d4,.m3t1
 		bsr	prErrs
 
-* ---- alternating-target register writes (stress the select lines) ----
-* write BNRY then page-switch, write CURR, switch back, verify both
-		PrA	<"BNRY/CURR alt errs: ">
-		moveq	#0,d5
+* ---- alternating-target writes, instrumented ----
+* separate counters: d0 = page-switch failures (CMD readback, page-independent),
+* d5 = register value failures. A failed switch is re-issued once so a value
+* check that follows is meaningful.
+		PrA	<"ALT sw/val errs: ">
+		moveq	#0,d0			; switch errors
+		moveq	#0,d5			; value errors
 		lea	patterns(pc),a2
 		moveq	#NPATT-1,d4
 .a1t1		move.b	(a2)+,d3
 		moveq	#NREPS-1,d2
-.a1t2		putBUS	d3,EN0_BOUNDARY
-		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
-		putBUS	d3,EN1_CURPAG
-		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+.a1t2		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
+		PIN24
+		getBUS	E8390_CMD,d1
+		and.b	#$c0,d1
+		cmp.b	#E8390_PAGE1,d1		; PS bits = 01 ?
+		beq.b	.aok1
+		addq.w	#1,d0
+		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD	; retry once
+.aok1		putBUS	d3,EN1_CURPAG
+		PIN24
+		getBUS	EN1_CURPAG,d1
+		cmp.b	d3,d1
+		beq.b	.aok2
+		addq.w	#1,d5
+.aok2		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+		PIN24
+		getBUS	E8390_CMD,d1
+		and.b	#$c0,d1
+		beq.b	.aok3			; PS bits = 00 ?
+		addq.w	#1,d0
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD	; retry once
+.aok3		putBUS	d3,EN0_BOUNDARY
 		PIN24
 		getBUS	EN0_BOUNDARY,d1
 		cmp.b	d3,d1
-		beq.b	.a1c1
+		beq.b	.aok4
 		addq.w	#1,d5
-.a1c1		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
-		PIN24
-		getBUS	EN1_CURPAG,d1
-		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
-		cmp.b	d3,d1
-		beq.b	.a1c2
-		addq.w	#1,d5
-.a1c2		dbra	d2,.a1t2
+.aok4		dbra	d2,.a1t2
 		dbra	d4,.a1t1
+		move	d0,-(sp)
+		bsr	prntWord
+		addq.l	#2,sp
+		PrA	<"/">
 		bsr	prErrs
 
 * ---- remote-DMA loopback: write pattern to buffer RAM, read back ----
+* remote-DMA write requires the chip STARTED (receiver stays quiet: RXOFF)
+		putBUSi	$ff,EN0_ISR
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
+
 		moveq	#NDMAPASS-1,d4
 .d1t1		PrA	<"DMA pass errs: ">
 * fill source buffer: b = i*13+pass*7
@@ -189,7 +211,7 @@ test5		cacheOff
 		lea	srcBuf,a0
 		move	#NDMA,d2
 		RAM2NE	a0,d2
-		putBUSi	E8390_NODMA+E8390_STOP,E8390_CMD
+		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
 		putBUSi	ENISR_RDC,EN0_ISR
 
 * remote read back
@@ -205,7 +227,7 @@ test5		cacheOff
 .d1t3		getBUS	NE_DATAPORT,d1
 		move.b	d1,(a0)+
 		dbra	d2,.d1t3
-		putBUSi	E8390_NODMA+E8390_STOP,E8390_CMD
+		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
 		putBUSi	ENISR_RDC,EN0_ISR
 
 * compare
@@ -236,6 +258,7 @@ test5		cacheOff
 		dbra	d2,.d2t2
 		PrS	crlf(pc)
 
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
 		cacheOn
 		rts
 
