@@ -52,7 +52,8 @@ fi
 if [ -n "${DEBUG:-}" ]; then
     sed -i -E 's/^(RXDEBPRT[[:space:]]+EQU[[:space:]]+)0/\14/;
                s/^(TXDEBPRT[[:space:]]+EQU[[:space:]]+)0/\14/;
-               s/^(MACAddDEBPRT[[:space:]]+EQU[[:space:]]+)0/\11/' "$BUILD/DEVSWIT.I"
+               s/^(MACAddDEBPRT[[:space:]]+EQU[[:space:]]+)0/\11/;
+               s/^(PARANOIA[[:space:]]+EQU[[:space:]]+)0/\11/' "$BUILD/DEVSWIT.I"
     echo "debug:       RX/TX printout level 4, MAC PROM dump on"
 fi
 
