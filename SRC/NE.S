@@ -1291,7 +1291,10 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		putBUSi	$ff,EN0_ISR
 		putBUSi	E8390_RXOFF,EN0_RXCR	; $20 set to monitor
 		putBUSi	E8390_TXOFF,EN0_TXCR	; $02 and loopback mode
-.again		putBUSi	NBSA_prom&$ff,EN0_RCNTLO
+		clr.b	pbFiller(sp)		; PROM read pass counter
+.again		move	#2,pbWordLen(sp)	; fresh doubled-byte detection per pass
+		moveq	#0,d0
+		putBUSi	NBSA_prom&$ff,EN0_RCNTLO
 		putBUSi	NBSA_prom>>8,EN0_RCNTHI
 		putBUS	d0,EN0_RSARLO		; DMA starting at $0000
 		putBUS	d0,EN0_RSARHI
@@ -1312,26 +1315,24 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		putBUSi	E8390_NODMA+E8390_START,E8390_CMD	; complete remote DMA
 		putBUSi	ENISR_RDC,EN0_ISR	; ack intr.
 
-	IFNE 0
-		PollKey
-		tst	d0
-		beq	.again
-
-		WaitKey
-	ENDC
-
 	IFNE	MACAddDEBPRT
-		lea	pbSA_prom(sp),a0
+		lea	pbSA_prom(sp),a0	; dump this pass's PROM image
 		moveq	#NBSA_prom/4-1,d2
-***		PrA	<$1b,"H">
 
 .t3		PrL	(a0)+
 		PrS	crlf(pc)
 		dbra	d2,.t3
-
-***		PrA	<$1b,"H">
-*		WaitKey
+		PrS	crlf(pc)
 	ENDC	; MACAddDEBPRT
+
+* Read the PROM twice and keep the second image. The 68030 I-cache is only 256
+* bytes, so the first pass through this code interleaves instruction fetches
+* between the cartridge cycles; the second pass runs warm and its cycles are
+* back-to-back and clean. (First-pass reads were seen returning junk depending
+* on where this code happened to be linked.)
+		addq.b	#1,pbFiller(sp)
+		cmp.b	#2,pbFiller(sp)
+		bcs	.again
 
 		cmp	#2,pbWordLen(sp)
 		bne.b	.c21
