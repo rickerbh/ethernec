@@ -1,14 +1,15 @@
-# EtherNEC / NetUSBee timing fix — analysis
+# EtherNEC / NetUSBee on the Atari TT — root cause & fix
 
-Working notes on why the STinG EtherNEC driver (`ENEC.STX` / `ENEC3.STX`) fails on the
-Atari TT while the AssemSoft NE2000 driver works on the same hardware, and whether a
-software fix is possible.
+Why the STinG EtherNEC driver (`ENEC.STX` / `ENEC3.STX`) fails on the Atari TT while it
+works on the Falcon and the AssemSoft NE2000 driver works on the TT.
 
 Source under analysis: the EtherNE(A/C) driver by Dr. **Thomas Redelberger** (ThR) and
-Lyndon Amsdon (ROM-port hardware). Note: the "Dr Richard" driver referred to on the
-forum is this one — the author is Thomas Redelberger, not "Richard".
+Lyndon Amsdon (ROM-port hardware). The "Dr Richard" driver referred to on exxosforum
+thread 780 is this one — the author is Thomas Redelberger.
 
-Reference: exxosforum thread 780 (Stephen Usher, 2018).
+**Bottom line: the root cause is the 68030 data cache, not bus timing.** Confirmed on real
+TT hardware. The fix is to keep the cartridge ROM window out of the data cache while the
+driver touches it. See §6–§7.
 
 ---
 
@@ -22,22 +23,17 @@ NetUSBee (RTL8019AS, NE2000-compatible)  ─IDE-40 ribbon─  ROM/cartridge-port
    Atari cartridge port ($FA0000 = ROM4, $FB0000 = ROM3)
 ```
 
-The cartridge port is **read-only** and has **no interrupt line**. The adapter fakes ISA
-I/O cycles out of ROM address strobes:
+The cartridge port is **read-only** and has **no interrupt line** (driver polls). The
+adapter fakes ISA I/O cycles out of ROM address strobes:
 
 - **Reading** ISA register `N`  → CPU reads byte at `ROM4 + (N<<9)` (`$FA0000` base).
   The ROM4 access strobe is decoded into ISA `/IOR`.
-- **Writing** ISA register `N` with value `V` → CPU *reads* address
-  `ROM3 + (((N<<8)|V)<<1)` (`$FB0000` base). The ROM3 strobe is decoded into ISA `/IOW`
-  and the low address lines carry the data. **"Writing" is simulated by reading** — there
-  is no write cycle on the cartridge port at all.
+- **Writing** ISA register `N` with value `V` → CPU *reads* `ROM3 + (((N<<8)|V)<<1)`
+  (`$FB0000` base); ROM3 strobe → ISA `/IOW`, low address lines carry the data.
+  **"Writing" is simulated by reading.**
 
-Because everything is a ROM read, the *width* of the resulting ISA `/IOR` // `/IOW` pulse
-and the *spacing* between consecutive pulses are set entirely by the CPU/bus cycle timing
-of the host machine. This is the crux of the whole problem.
-
-Driver operates in **polling** mode (no IRQ line) — STinG calls the driver from its
-timeslice; the driver reads the 8390 ISR register to discover RX/TX events.
+Every access is therefore a read in the **cartridge ROM address space** — and that is the
+crux: ROM space is cacheable.
 
 ---
 
@@ -45,139 +41,97 @@ timeslice; the driver reads the 8390 ISR register to discover RX/TX events.
 
 | File | Lang | Role |
 |------|------|------|
-| `ENESTNG.C` | Turbo-C 2.0 | STinG glue: `install`, port struct, ARP, `my_send`/`my_receive`. Module entry point. |
-| `NESTNG.S`  | DEVPAC asm | `rtrvPckt` / `rtrvStngDgram` — pull packet from card straight into a STinG datagram. |
-| `NE.S`      | DEVPAC asm | Generic 8390/NE2000 core (from Linux `ne.c`/`8390.c`): probe, open/close, xmit, the polled "interrupt" handler, receive, reset. |
-| `8390.I`    | asm inc    | DP8390 register + bit definitions. |
-| `BUS.I`     | asm inc    | **Bus-access macros** — copied over from one of `BUSENE*.I` at build time. This is the hardware-specific layer. |
-| `BUSENEC.I` | asm inc    | Cartridge-port bus macros, **68000** (uses `add.w`+`tst.b` addressing trick). → `ENEC.STX` |
-| `BUSENEC3.I`| asm inc    | Cartridge-port bus macros, **68020+** (uses scaled index `*2`; 68030 variant emits raw opcode). → `ENEC3.STX` |
-| `UTI.S/.I`  | asm        | Debug print + stack helpers. |
-| `NETDEV.I`  | asm inc    | `struct device` (DVS) layout. |
+| `ENESTNG.C` | Turbo-C 2.0 | STinG glue: install, port struct, ARP. Module entry point. |
+| `NESTNG.S`  | DEVPAC asm | `rtrvPckt`/`rtrvStngDgram` — pull packet from card into a STinG datagram. |
+| `NE.S`      | DEVPAC asm | Generic 8390/NE2000 core (from Linux `ne.c`): probe, open/close, xmit, polled ISR, receive, reset. |
+| `8390.I`    | asm inc    | DP8390 register/bit definitions. |
+| `BUS.I`     | asm inc    | Bus-access macros — one of `BUSENE*.I` copied over it at build time. |
+| `BUSENEC.I` | asm inc    | Cartridge-port bus macros, **68000**. → `ENEC.STX` |
+| `BUSENEC3.I`| asm inc    | Cartridge-port bus macros, **68020+/030**. → `ENEC3.STX` (**the TT build; holds the fix**) |
 
-Build (original): DEVPAC 2.0 assembles the `.S`; Turbo-C 2.0 compiles `ENESTNG.C`;
-TLINK links them into a headerless TOS PRG renamed `.STX`, which `STING.PRG` loads.
-
-The C↔asm boundary uses the **Turbo-C/Pure-C register calling convention** (args in
-`d0/d1/a0/a1`), *not* the standard stack convention. This matters for the build tooling
-(see §6).
+Every NE.S entry point (`ei_probe1`, `ei_open`, `ei_close`, `ei_start_xmit`,
+`ei_interrupt`, `get_stats`) brackets its hardware access with `ldBUSRegs` (load
+`a5`=ROM3, `a6`=ROM4) on the way in and `deselBUS` on the way out. `NESTNG.S` runs *nested*
+inside `ei_interrupt`, so it needs no bracket of its own. This bracket is where the fix
+lives.
 
 ---
 
-## 3. The bus-access macros (the timing-critical code)
+## 3. Symptoms observed on the TT (HT2 PROM/MAC test)
 
-`BUSENEC.I` (68000 build):
+`HT2ENE.S` resets the card and reads its 32-byte PROM (first 12 bytes = MAC, each byte
+doubled). On the TT + NetUSBee:
 
-```asm
-getBUS  MACRO
-        move.b  (\1)<<9(RdBUS),\2      ; RdBUS=a6=$FA0000 ; one ISA read = one move.b
-        ENDM
+- ISR after reset read `$83`, `$a5`, `$85`, `$81`, `$c0` — the reset bit (`$80`) always set
+  but the low bits unstable / dependent on run history.
+- **MAC came back as a constant `3e` repeated** — the remote-DMA read returned the same
+  byte for all 32 positions.
 
-putBUS  MACRO                          ; "write" = read of ROM3
-        move.w  #(\2)<<8,RyBUS
-        ...
-        add.w   RyBUS,RyBUS
-        tst.b   0(RcBUS,RyBUS.w)       ; RcBUS=a5=$FB0000 ; the "write" bus cycle
-        ENDM
-```
+## 4. Timing hypothesis — tested and rejected
 
-Bulk data uses `movep`:
+First hypothesis (matching exxosforum thread 780 and Linux `ne.c`'s use of paused I/O
+`inb_p`/`outb_p`, which this port dropped): the ~32 MHz TT bus issues cartridge cycles too
+close together for the RTL8019AS, so a recovery delay between accesses is needed.
 
-```asm
-NE2RAM: ...
-        movep.l NE_DATAPORT<<9(RdBUS),d0   ; read 4 data-port bytes back-to-back
-```
+A sweep of inter-access nop padding (0 → 64 nops, ~0 → ~6 µs per access) was built and run
+on the TT. **It never fixed the MAC** — it stayed `3e` at every padding level. A constant
+repeated value that is immune to inter-access spacing is not a recovery-time symptom.
+Hypothesis rejected; the nop-recovery code was removed.
 
-**There is no delay and no dummy/recovery cycle between accesses.** A register read is a
-single `move.b`; the next access can begin on the very next bus cycle.
+## 5. Root cause — the 68030 data cache (confirmed)
 
-Compare Linux `ne.c`, the acknowledged source of this code, which uses `inb_p`/`outb_p`
-— the **"pause" (`_p`) variants that insert a recovery delay** between I/O accesses. The
-Atari port dropped the pauses and relies on the slow ST/Falcon bus to space accesses far
-enough apart on its own. `ne_reset_8390` even warns:
+The data port is always the **same address** (`$FA2000`), read in a loop. On the 68030 the
+cartridge ROM window is **cacheable**, so:
 
-```asm
-* DON'T change these to inb_p/outb_p or reset will fail on clones
-```
+1. The first read misses, does a real bus cycle, loads `$3e` into the data cache.
+2. Every subsequent read of `$FA2000` is a **cache hit** and returns `$3e` — no bus cycle,
+   so the card's remote-DMA pointer never advances.
 
-— i.e. the author was explicitly aware of paused I/O and deliberately omitted it.
+This is immune to delay (a hit ignores timing) and produces exactly the constant value
+seen. It also explains why the Falcon (and AssemSoft's driver, which handles caching)
+work while this driver on the TT does not.
 
----
-
-## 4. Where delays *do* exist
-
-Delays exist **only** around reset, driven by `ADelay` and a per-machine calibrated
-`ticks2ms`:
-
-- `ei_probe1` calibrates `ticks2ms` (busy-loop counts ≈ 2 ms) and waits ~2 ms after the
-  reset strobe before reading the MAC PROM.
-- `ne_reset_8390` waits `ticks2ms` after reset.
-- `ei_rx_overrun` waits 2 ms (a genuine 8390 requirement).
-
-**Every other chip access — every register read/write in xmit, receive, the polled ISR
-scan, and the `movep` data loops — has no delay at all.**
+**Confirmation:** a build that disabled the 68030 data cache (CACR ED bit) around the
+probe, with *no* other change, read the **correct MAC** on the TT and a clean ISR of
+`$c0` (RST+RDC). Root cause proven.
 
 ---
 
-## 5. Why it works on Falcon/ST but not TT
+## 6. The fix (`BUSENEC3.I`)
 
-The RTL8019AS needs a minimum ISA read/write **recovery time** between consecutive I/O
-accesses (and a minimum `/IOR`//`/IOW` pulse width). On an 8 MHz ST or a 16 MHz Falcon,
-a ROM-space `move.b`/`movep` cycle is long enough — and the gap to the next one wide
-enough — that the chip keeps up by luck of the slow bus.
+Bracket every cartridge access block with a data-cache disable/enable:
 
-The **TT runs the bus at ~32 MHz** (double the Falcon). ROM cycles and the gaps between
-them shrink below what the RTL8019AS tolerates, so:
+- `ldBUSRegs` → `cacheDataOff`: `movec CACR,d0` / `and.w #$FEFF,d0` (clear ED) / `movec`.
+- `deselBUS`  → `cacheDataOn` : `movec CACR,d0` / `or.w #$0100,d0` (set ED) / `movec`.
 
-- Register reads latch **stale / not-yet-valid** data (e.g. the ISR read in the polled
-  handler → the driver "sees" phantom RX events).
-- `movep` back-to-back data reads run faster than the remote-DMA port can refill.
-- Writes may not present a wide enough `/IOW`.
+Properties, chosen to match STinG's own Lance driver (`cache_off`/`cache_on`) and to keep
+it minimal:
 
-This matches Stephen Usher's 2018 findings exactly: after **only** increasing the
-post-reset delay he got the **MAC address** read correctly (the PROM read is the one path
-that already runs after a big delay), but **TX stayed broken** and he saw **"phantom
-received packets when the hard disk is active"** — i.e. the un-delayed register/ISR path
-was still being read too fast and returning garbage. He stopped there.
+- **Data cache only.** No driver code lives in the cartridge window, so the instruction
+  cache is left enabled.
+- **No flush.** Only the ED enable bit is toggled; the cache is never cleared, so there is
+  no per-poll flush cost. The cartridge address never enters the cache (it is only ever
+  read with ED=0), so no stale cartridge line can exist.
+- **68020+/030 only.** This is the `*3` bus variant; `movec` is always legal here. The
+  plain 68000 `BUSENEC.I` variant has no data cache and is untouched.
+- `d0` is preserved, so the macros are safe to invoke from the existing bracket points.
 
-The AssemSoft driver works on the same TT + NetUSBee, which is strong evidence the
-**hardware is capable** and the difference is purely in **software access timing** (the
-AssemSoft driver almost certainly spaces its accesses — the equivalent of Linux's paused
-I/O).
+Runs in supervisor mode (the driver's context; `movec` is privileged) — same assumption
+the Lance driver makes.
 
----
+## 7. Open item to verify on hardware
 
-## 6. Verdict: is a software fix possible?
-
-**Very likely yes.** The fix is to re-introduce a bounded **recovery delay between
-consecutive chip accesses** (the paused-I/O the port dropped), specifically on the paths
-that currently have none:
-
-1. **Register access** (`getBUS`/`putBUS`/`getMore`/`putMore`, `putBUSi`) — add a short,
-   tunable pad (a few dummy ROM reads / `nop`s, or a tiny calibrated spin) after each
-   access. This is the path that produces the phantom ISR/RX reads and the broken xmit.
-2. **Bulk data** (`NE2RAM`/`RAM2NE`) — the `movep` bursts can't be padded internally;
-   on fast machines replace `movep` with spaced single `move.b` reads/writes (the
-   `BUS.I`/Hades variant already uses single `move.b` loops and is a ready template).
-3. Keep the existing reset delays; Usher already showed the reset path is fine.
-
-Make the pad **tunable at build time** (and ideally auto-scaled off the `ticks2ms`
-calibration already computed in `ei_probe1`) so we can dial it in against real hardware:
-start generous (correctness first), then reduce for throughput.
-
-**Residual risk (~30%).** Usher's "phantom packets *during disk activity*" *could*
-instead point to cartridge-bus signal-integrity/EMI that timing can't fully cure. The
-more likely reading is simply that his un-delayed ISR reads returned garbage; disk DMA
-activity just changes bus timing enough to expose it. We won't know for certain until we
-test padded register access on the real TT — which is exactly the loop the user can run.
-
-The `ENEC3.STX` (68020+) build is the right base for the TT (the TT is 68030).
+Received-packet data is DMA-copied into a freshly `KRmalloc`'d STinG buffer while the data
+cache is disabled. If that buffer address happened to be cached with stale contents,
+re-enabling the cache could expose stale bytes. STinG's Lance driver has the identical
+structure and ships without flushing, so this is expected to be a non-issue — but it is the
+one thing to watch when testing real RX/TX. If it ever bites, the remedy is a targeted
+data-cache clear (CACR CD bit) in `cacheDataOn`.
 
 ---
 
-## 7. Not needed
+## 8. Not needed
 
-- **No change to the STinG core** (this is entirely in the EtherNEC driver repo).
-- **No migration to Pure C.** The timing-critical code *must* stay in assembler — you
-  cannot control inter-access spacing reliably from C. Only the tooling question (how to
-  build on Linux vs. under an emulator) touches the C↔asm ABI; see build notes.
+- **No change to the STinG core** — the fix is entirely in the EtherNEC driver.
+- **No migration to Pure C** — the fix is a few lines of assembler in one bus include.
+- **No inter-access delays** — the timing theory was disproven on hardware.
