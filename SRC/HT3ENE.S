@@ -269,6 +269,7 @@ rtrvPckt
 		subq.l	#2,d1			; two bytes less we will eat first
 
 		lea.l	pcktBuf,a0		; pointer to data
+		CNOP	2,4			; pin to addr%4==2: cartridge reads fail at %4==0 (hw-verified)
 		getBUS	NE_DATAPORT,d0		; get first byte
 		move.b	d0,(a0)+
 		getMore	NE_DATAPORT,d0		; get second byte

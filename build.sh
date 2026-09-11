@@ -76,6 +76,23 @@ case "$TARGET" in
     echo "linking -> build/$OUT"
     vlink -bataritos -o "$BUILD/$OUT" "$BUILD/HT3ENE.o" "$BUILD/NE.o" "$BUILD/UTI.o"
     ls -l "$BUILD/$OUT"; file "$BUILD/$OUT"
+
+    # --- alignment check (hardware-verified rule) --------------------------
+    # Cartridge read loops work when their first read instruction sits at
+    # addr%4==2 and fail at addr%4==0 (6/6 correlation on real TT). The
+    # sources pin the sites with CNOP 2,4; verify the LINKED result.
+    htsize=$(vobjdump "$BUILD/HT3ENE.o" | grep -A1 'SECTION "TEXT"' | grep -oE 'Total size: [0-9]+' | grep -oE '[0-9]+')
+    nealign=$(vobjdump "$BUILD/NE.o" | grep -A1 'SECTION "TEXT"' | grep -oE 'Alignment: [0-9]+' | grep -oE '[0-9]+')
+    nebase=$(( (htsize + nealign - 1) / nealign * nealign ))
+    t2hex=$(awk '/\.t2[ \t]/{f=1} f&&/^01:[0-9A-F]{8}/{print substr($1,4,8); exit}' "$BUILD/NE.lst")
+    [ -z "$t2hex" ] && { echo "ALIGNMENT CHECK FAILED: .t2 not found in NE.lst" >&2; exit 3; }
+    t2=$((16#$t2hex))
+    phase=$(( (nebase + t2) % 4 ))
+    if [ "$phase" -ne 2 ]; then
+        echo "ALIGNMENT CHECK FAILED: probe read loop at phase $phase (must be 2)" >&2
+        exit 3
+    fi
+    echo "alignment check: probe read loop at phase 2 -- OK"
     exit 0 ;;
   ht4) SRCFILE=HT4ENEC.S ; OUT=HT4ENEC.TOS ;;
   *) echo "unknown target: $TARGET" >&2; exit 2 ;;
