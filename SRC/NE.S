@@ -331,7 +331,7 @@ ei_start_xmit	move.w	d0,d2			; save arg
 		move.b	DVS+lcl_tx_start_page,d0
 		putBUS	d0,EN0_RSARHI		; 8390 page to tx from
 * start remote DMA write
-		putBUSDi	E8390_RWRITE+E8390_START,E8390_CMD
+		putBUSi	E8390_RWRITE+E8390_START,E8390_CMD
 
 		RAM2NE	a2,d2			; put ethernet packet first  portion
 		RAM2NE	a1,d1			; put ethernet packet second portion
@@ -344,7 +344,7 @@ ei_start_xmit	move.w	d0,d2			; save arg
 		putBUS	d3,EN0_TCNTHI		; "
 		; 8390 page to tx from was already set in NS8390_init
 * start transmitter
-		putBUSDi	E8390_NODMA+E8390_TRANS+E8390_START,E8390_CMD
+		putBUSi	E8390_NODMA+E8390_TRANS+E8390_START,E8390_CMD
 	IFGE	TXDEBPRT-3
 		PrA	<" start",13,10>
 	ENDC
@@ -768,7 +768,7 @@ ei_receive	movem.l	Rrx,-(sp)			; save registers
 		putBUS	d0,EN0_RCNTHI			; Hdr is only some bytes
 		putBUS	d0,EN0_RSARLO			; Hdr is on page boundary
 		putBUS	RrxReadPg,EN0_RSARHI
-		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD ; start remote DMA Read
+		putBUSi	E8390_RREAD+E8390_START,E8390_CMD ; start remote DMA Read
 
 		PIN24
 		getBUS	NE_DATAPORT,d0
@@ -1015,7 +1015,7 @@ ei_rx_overrun	Alloc	roNLcl				; locals vars
 		tst	roMustResend(sp)
 		beq.b	.c2
  
-		putBUSDi	E8390_NODMA+E8390_PAGE0+E8390_START+E8390_TRANS,E8390_CMD
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START+E8390_TRANS,E8390_CMD
 
 .c2		deAlloc	roNLcl			; pop local vars
 		rts
@@ -1301,7 +1301,7 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		putBUSi	NBSA_prom>>8,EN0_RCNTHI
 		putBUS	d0,EN0_RSARLO		; DMA starting at $0000
 		putBUS	d0,EN0_RSARHI
-		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD	; go
+		putBUSi	E8390_RREAD+E8390_START,E8390_CMD	; go
 
 		move	#NBSA_prom/2-1,d2
 		lea	pbSA_prom(sp),a0
