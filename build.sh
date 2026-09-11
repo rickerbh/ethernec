@@ -41,6 +41,13 @@ done
 sed -E "$SECFIX" "$SRC/$BUS_VARIANT" > "$BUILD/BUS.I"
 echo "bus variant: $BUS_VARIANT   cpu: $CPU"
 
+# PUTBUS_DYN=1: replace putBUSi's static-displacement write with the dynamic
+# putBUS form (the only write form the HT2 test -- proven on hardware -- uses)
+if [ -n "${PUTBUS_DYN:-}" ]; then
+    sed -i 's|tst.b\t((\\2<<8)!(\\1))<<1(RcBUS)\t; write by reading|putBUS\t#\\1,\\2|' "$BUILD/BUS.I"
+    echo "putBUSi:     aliased to dynamic putBUS form"
+fi
+
 # DEBUG=1: enable the driver's built-in debug printouts (DEVSWIT.I levels)
 if [ -n "${DEBUG:-}" ]; then
     sed -i -E 's/^(RXDEBPRT[[:space:]]+EQU[[:space:]]+)0/\14/;
@@ -49,7 +56,8 @@ if [ -n "${DEBUG:-}" ]; then
     echo "debug:       RX/TX printout level 4, MAC PROM dump on"
 fi
 
-VASMBASE="vasmm68k_mot $CPU -devpac -quiet -I $BUILD"
+VASMBASE="vasmm68k_mot $CPU -devpac -quiet -I $BUILD ${RECOVER:+-DNE_RECOVER=$RECOVER}"
+[ -n "${RECOVER:-}" ] && echo "recovery pad: NE_RECOVER=$RECOVER nops/access"
 VASM="$VASMBASE -Ftos"
 
 # --- targets -----------------------------------------------------------------
