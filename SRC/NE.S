@@ -486,7 +486,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 
 
 .c4		mtst	ENISR_COUNTERS,RitInts
-		beq.b	.c5
+		beq	.c5
 
 		move	#$ff,d1
 		getBUS	EN0_COUNTER0,d0
@@ -1038,7 +1038,7 @@ get_stats	movem.l	Rgs,-(sp)
 		ldBUSRegs			; load registers to access Bus
 
 		tst.b	dev_start(RgsDVS)	; device active?
-		beq.b	.c1			; if not, just return pointer
+		beq	.c1			; if not, just return pointer
 
 * if accessible and device is running, update statistics
 		move	#$ff,d1
@@ -1069,7 +1069,7 @@ set_multicast_list
 		and	#IFF_PROMISC,d0
 		beq.b	.c1
 		putBUSi	E8390_RXCONFIG+$18,EN0_RXCR
-		bra.b	.c3
+		bra	.c3
 
 .c1		move	DVS+dev_flags,d0
 		and	#IFF_ALLMULTI,d0
@@ -1173,7 +1173,7 @@ NS8390_init	move	d0,-(sp)		; save argument "startp"
 		sf	DVS+lcl_irqlock		; initialize
 
 		move	(sp)+,d0		; restore argument "startp"
-		beq.b	.c1
+		beq	.c1
 		putBUSi	$ff,EN0_ISR		; clear all interrupts
 * for this application (polling) we leave all intr masked.
 *		putBUSi	ENISR_ALL,EN0_IMR	; and enable all

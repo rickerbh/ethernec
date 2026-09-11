@@ -238,7 +238,7 @@ RAM2NE		MACRO
 
 * put the packet; optimized for speed, we do 8 bytes at once
 		ror.l	#3,\2			; store remainder in upper word
-		bra.b	.Rb1\@
+		bra	.Rb1\@
 
 .Rt1\@		putMore	(\1)+,NE_DATAPORT
 		putMore	(\1)+,NE_DATAPORT
@@ -252,7 +252,7 @@ RAM2NE		MACRO
 
 		clr.w	\2			; prepare for remainder
 		rol.l	#3,\2			; restore remainder bits
-		bra.b	.Rb2\@
+		bra	.Rb2\@
 
 .Rt2\@		putMore	(\1)+,NE_DATAPORT	; put the remaining bytes
 .Rb2\@		dbra	\2,.Rt2\@
@@ -279,7 +279,7 @@ NE2RAM		MACRO
 
 * get the Packet; optimized for speed, we do 16 bytes at once.
 		ror.l	#4,\2			; store remainder in upper word
-		bra.b	.Nb1\@
+		bra	.Nb1\@
 
 .Nt1\@		movep.l	NE_DATAPORT<<9(RdBUS),d0	; four bytes at once
 		move.l	d0,(\1)+
@@ -295,7 +295,7 @@ NE2RAM		MACRO
 * rol.l #3 instead of #4 because we write a WORD at once not a byte
 * thus the lowest significant bit (which shall be 0 anyway) is not used
 		rol.l	#3,\2				; restore remainder bits
-		bra.b	.Nb2\@
+		bra	.Nb2\@
 
 .Nt2\@		movep.w	NE_DATAPORT<<9(RdBUS),d0
 		move.w	d0,(\1)+
