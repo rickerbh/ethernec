@@ -184,25 +184,59 @@ test5		cacheOff
 		bsr	prErrs
 
 * ---- remote-DMA loopback: write pattern to buffer RAM, read back ----
-* remote-DMA write requires the chip STARTED (receiver stays quiet: RXOFF)
+* ---- remote-DMA loopback, three read variants -------------------------------
+* Writes always run STARTED (the only mode where they land). Reads always use
+* RREAD+START exactly like the (working) PROM probe. Variants differ in how the
+* remote-DMA engine is treated between the write and the read:
+* A: nothing (reproduces the wedged constant-byte readback)
+* B: STOP + settle + restart -- does stopping clear the engine?
+* C: RBCR:=0 'magic incantation' (Linux ne.c overrun recovery), no stop
 		putBUSi	$ff,EN0_ISR
 		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD
 
-		moveq	#NDMAPASS-1,d4
-.d1t1		PrA	<"DMA pass errs: ">
-* fill source buffer: b = i*13+pass*7
-		lea	srcBuf,a0
-		moveq	#0,d1
-		moveq	#NDMA-1,d2
-.d1t2		move.b	d1,d3
-		mulu	#13,d3
-		add.b	d4,d3
-		move.b	d3,(a0)+
-		addq.b	#1,d1
-		dbra	d2,.d1t2
+		PrA	<"DMA-A plain errs: ">
+		moveq	#0,d4
+		bsr	dmaFill
+		bsr	dmaWrite
+		bsr	dmaRead
+		bsr	dmaCmp
+		bsr	prErrs
 
-* remote write NDMA bytes to page $40
-		putBUSi	NDMA,EN0_RCNTLO
+		PrA	<"DMA-B stop  errs: ">
+		moveq	#1,d4
+		bsr	dmaFill
+		bsr	dmaWrite
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+		move.l	#20000,d1		; settle
+.dbw		subq.l	#1,d1
+		bne.b	.dbw
+		bsr	dmaRead			; RREAD+START restarts the chip
+		bsr	dmaCmp
+		bsr	prErrs
+
+		PrA	<"DMA-C rbcr0 errs: ">
+		moveq	#2,d4
+		bsr	dmaFill
+		bsr	dmaWrite
+		moveq	#0,d1			; Linux ne.c: reset RBCR0/1 as per
+		putBUS	d1,EN0_RCNTLO		; 'magic incantation' before reuse
+		putBUS	d1,EN0_RCNTHI
+		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
+		bsr	dmaRead
+		bsr	dmaCmp
+		bsr	prErrs
+		bra	dmaDone
+
+dmaFill		lea	srcBuf,a0
+		move.b	d4,d3
+		mulu	#7,d3
+		move	#NDMA-1,d2
+.f1		move.b	d3,(a0)+
+		add.b	#13,d3
+		dbra	d2,.f1
+		rts
+
+dmaWrite	putBUSi	NDMA,EN0_RCNTLO
 		moveq	#0,d1
 		putBUS	d1,EN0_RCNTHI
 		putBUS	d1,EN0_RSARLO
@@ -213,35 +247,34 @@ test5		cacheOff
 		RAM2NE	a0,d2
 		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
 		putBUSi	ENISR_RDC,EN0_ISR
+		rts
 
-* remote read back
-		putBUSi	NDMA,EN0_RCNTLO
+dmaRead		putBUSi	NDMA,EN0_RCNTLO
 		moveq	#0,d1
 		putBUS	d1,EN0_RCNTHI
 		putBUS	d1,EN0_RSARLO
 		putBUSi	$40,EN0_RSARHI
-		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD
+		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD	; exactly as the working probe
 		lea	dstBuf,a0
 		move	#NDMA-1,d2
 		PIN24
-.d1t3		getBUS	NE_DATAPORT,d1
+.r1		getBUS	NE_DATAPORT,d1
 		move.b	d1,(a0)+
-		dbra	d2,.d1t3
-		putBUSi	E8390_NODMA+E8390_START,E8390_CMD
+		dbra	d2,.r1
 		putBUSi	ENISR_RDC,EN0_ISR
+		rts
 
-* compare
-		moveq	#0,d5
+dmaCmp		moveq	#0,d5
 		lea	srcBuf,a0
 		lea	dstBuf,a1
 		move	#NDMA-1,d2
-.d1t4		cmpm.b	(a0)+,(a1)+
-		beq.b	.d1c1
+.c1		cmpm.b	(a0)+,(a1)+
+		beq.b	.c2
 		addq.w	#1,d5
-.d1c1		dbra	d2,.d1t4
-		bsr	prErrs
-		dbra	d4,.d1t1
+.c2		dbra	d2,.c1
+		rts
 
+dmaDone
 * dump first 16 readback bytes of the last pass for eyeballing
 		PrA	<"last readback: ">
 		lea	dstBuf,a0
