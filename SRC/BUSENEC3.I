@@ -84,6 +84,34 @@ ldBUSRegs	MACRO				; for faster access to hardware
 		ENDM
 
 
+*
+* Per-access recovery delay for fast machines (TT etc.).
+*
+* The cartridge (ISA) cycle length and the gap between consecutive cycles are
+* set by the host bus speed. On the ~32 MHz TT bus these come too close together
+* for the RTL8019AS to service, so remote-DMA reads return stale data (the DMA
+* pointer never advances) and register reads latch unstable bits. This driver
+* is a port of Linux ne.c, which uses paused I/O (inb_p/outb_p); that pause was
+* dropped here on the assumption of a slow ST/Falcon bus.
+*
+* RECOVER re-introduces that pause as NE_RECOVER nops after every chip access,
+* widening the gap before the next one. Tune per machine: raise until reads are
+* reliable, then lower for throughput. NE_RECOVER = 0 reproduces the original
+* (no pad). Override at assembly time with vasm -DNE_RECOVER=<n>.
+*
+	IFND	NE_RECOVER
+NE_RECOVER	EQU	0
+	ENDC
+
+RECOVER		MACRO
+	IFNE	NE_RECOVER
+		REPT	NE_RECOVER
+		nop
+		ENDR
+	ENDC
+		ENDM
+
+
 putBUS		MACRO
 		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15
 		move.b	\1,RyBUS		; merge in data
@@ -92,11 +120,13 @@ putBUS		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
+		RECOVER
 		ENDM
 
 
 putBUSi		MACRO
 		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
+		RECOVER
 		ENDM
 
 
@@ -107,16 +137,19 @@ putMore		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
+		RECOVER
 		ENDM
 
 
 getBUS		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
+		RECOVER
 		ENDM
 
 
 getMore		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
+		RECOVER
 		ENDM
 
 *

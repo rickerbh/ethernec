@@ -36,7 +36,8 @@ rm -f "$BUILD/BUS.I"                 # remove the symlink to SRC/BUS.I (Hades)
 cp "$SRC/$BUS_VARIANT" "$BUILD/BUS.I"  # real copy of the chosen variant wins
 echo "bus variant: $BUS_VARIANT   cpu: $CPU"
 
-VASM="vasmm68k_mot $CPU -Ftos -devpac -quiet -I $BUILD"
+VASM="vasmm68k_mot $CPU -Ftos -devpac -quiet -I $BUILD ${RECOVER:+-DNE_RECOVER=$RECOVER}"
+[ -n "${RECOVER:-}" ] && echo "recovery pad: NE_RECOVER=$RECOVER nops/access"
 
 # --- targets -----------------------------------------------------------------
 case "$TARGET" in
