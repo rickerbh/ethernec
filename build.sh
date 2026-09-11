@@ -95,6 +95,7 @@ case "$TARGET" in
     echo "alignment check: probe read loop at phase 2 -- OK"
     exit 0 ;;
   ht4) SRCFILE=HT4ENEC.S ; OUT=HT4ENEC.TOS ;;
+  ht5) SRCFILE=HT5ENE.S  ; OUT=HT5.TOS ;;
   *) echo "unknown target: $TARGET" >&2; exit 2 ;;
 esac
 

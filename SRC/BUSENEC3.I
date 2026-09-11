@@ -219,6 +219,14 @@ putBUSi		MACRO				; register write, immediate, doubled
 		ENDM
 
 
+putBUSDi	MACRO				; single-pulse immediate write: remote-DMA
+*					; starts and the TX trigger must be issued once
+		tst.b	((\1)&$ff)<<1(RdBUS)	; precondition A1-A8 (reads CMD, harmless)
+		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
+		RECOVER
+		ENDM
+
+
 putBUSD		MACRO				; DATA PORT write: exactly one pulse
 		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15
 		move.b	\1,RyBUS		; merge in data

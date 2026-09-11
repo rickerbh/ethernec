@@ -1,0 +1,259 @@
+*********************************************************************************
+* HT5ENE.S									*
+*	EtherNEC/TT reliability self-test: quantify cartridge access errors	*
+*	without touching the wire.						*
+*	- register write/readback matrix: 3 write modes x bit patterns x reps	*
+*	- remote-DMA loopback: pattern data written to and read back from the	*
+*	  card's buffer RAM							*
+*	Software Copyright 2026, GPL (see COPYING.TXT). Builds on Dr. Thomas	*
+*	Redelberger's EtherNE package.						*
+*********************************************************************************
+
+		OPT	O+
+		OPT	W-
+		OPT	M+
+
+		INCLUDE	UTI.I
+		INCLUDE	BUS.I
+		INCLUDE	8390.I
+
+NPATT		EQU	12
+NREPS		EQU	8		; per pattern -> 96 writes per mode
+NDMA		EQU	64		; bytes per DMA loop pass
+NDMAPASS	EQU	4
+
+		SECTION	TEXT
+
+myStart		move.l	4(sp),a0
+		move.l	$18(a0),d0
+		add.l	$1c(a0),d0
+		add.l	#512,d0			; stack
+		move.l	d0,sp
+		sub.l	a0,d0
+		move.l	d0,-(sp)
+		move.l	a0,-(sp)
+		clr	-(sp)
+		move	#$4a,-(sp)		; Mshrink
+		trap	#1
+		lea	12(sp),sp
+
+		PrS	.m1(pc)
+
+		pea	test5(pc)
+		move.w	#$26,-(sp)		; Supexec
+		trap	#14
+		addq.l	#6,sp
+
+		PrS	.m2(pc)
+		WaitKey
+
+		clr	-(sp)
+		trap	#1
+		illegal
+
+.m1		DC.B	$1b,"pEtherNEC/TT access reliability self-test",$1b,"q",13,10,0
+.m2		DC.B	13,10,"done - press any key",13,10,0
+		EVEN
+
+*********************************************************************************
+
+test5		cacheOff
+		ldBUSRegs
+
+* ---- reset + settle ----
+		getBUS	NE_RESET,d1
+		putBUSD	d1,NE_RESET
+		move.l	#240000,d0		; generous settle (~60ms)
+.t0		subq.l	#1,d0
+		bne.b	.t0
+
+		PrA	<"ISR after reset (expect 80): ">
+		getBUS	EN0_ISR,d1
+		PrB	d1
+		PrS	crlf(pc)
+
+* ---- minimal init ----
+		putBUSi	$ff,EN0_ISR
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+		putBUSi	$48,EN0_DCFG
+		moveq	#0,d1
+		putBUS	d1,EN0_RCNTLO
+		putBUS	d1,EN0_RCNTHI
+		putBUSi	E8390_RXOFF,EN0_RXCR
+		putBUSi	E8390_TXOFF,EN0_TXCR
+
+* ---- register write/readback matrix on BNRY (page0, R/W) ----
+* mode 1: raw single write (no precondition, no double)
+		PrA	<"BNRY raw    errs: ">
+		moveq	#0,d5			; error count
+		lea	patterns(pc),a2
+		moveq	#NPATT-1,d4
+.m1t1		move.b	(a2)+,d3
+		moveq	#NREPS-1,d2
+.m1t2		move.w	#(EN0_BOUNDARY)<<8,RyBUS
+		move.b	d3,RyBUS
+		tst.b	0(RcBUS,RyBUS.w*2)	; raw write
+		RECOVER
+		CNOP	2,4
+		getBUS	EN0_BOUNDARY,d1
+		cmp.b	d3,d1
+		beq.b	.m1c1
+		addq.w	#1,d5
+.m1c1		dbra	d2,.m1t2
+		dbra	d4,.m1t1
+		bsr	prErrs
+
+* mode 2: preconditioned single write
+		PrA	<"BNRY precond errs: ">
+		moveq	#0,d5
+		lea	patterns(pc),a2
+		moveq	#NPATT-1,d4
+.m2t1		move.b	(a2)+,d3
+		moveq	#NREPS-1,d2
+.m2t2		putBUSD	d3,EN0_BOUNDARY
+		CNOP	2,4
+		getBUS	EN0_BOUNDARY,d1
+		cmp.b	d3,d1
+		beq.b	.m2c1
+		addq.w	#1,d5
+.m2c1		dbra	d2,.m2t2
+		dbra	d4,.m2t1
+		bsr	prErrs
+
+* mode 3: preconditioned double write
+		PrA	<"BNRY dbl    errs: ">
+		moveq	#0,d5
+		lea	patterns(pc),a2
+		moveq	#NPATT-1,d4
+.m3t1		move.b	(a2)+,d3
+		moveq	#NREPS-1,d2
+.m3t2		putBUS	d3,EN0_BOUNDARY
+		CNOP	2,4
+		getBUS	EN0_BOUNDARY,d1
+		cmp.b	d3,d1
+		beq.b	.m3c1
+		addq.w	#1,d5
+.m3c1		dbra	d2,.m3t2
+		dbra	d4,.m3t1
+		bsr	prErrs
+
+* ---- alternating-target register writes (stress the select lines) ----
+* write BNRY then page-switch, write CURR, switch back, verify both
+		PrA	<"BNRY/CURR alt errs: ">
+		moveq	#0,d5
+		lea	patterns(pc),a2
+		moveq	#NPATT-1,d4
+.a1t1		move.b	(a2)+,d3
+		moveq	#NREPS-1,d2
+.a1t2		putBUS	d3,EN0_BOUNDARY
+		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
+		putBUS	d3,EN1_CURPAG
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+		CNOP	2,4
+		getBUS	EN0_BOUNDARY,d1
+		cmp.b	d3,d1
+		beq.b	.a1c1
+		addq.w	#1,d5
+.a1c1		putBUSi	E8390_NODMA+E8390_PAGE1+E8390_STOP,E8390_CMD
+		CNOP	2,4
+		getBUS	EN1_CURPAG,d1
+		putBUSi	E8390_NODMA+E8390_PAGE0+E8390_STOP,E8390_CMD
+		cmp.b	d3,d1
+		beq.b	.a1c2
+		addq.w	#1,d5
+.a1c2		dbra	d2,.a1t2
+		dbra	d4,.a1t1
+		bsr	prErrs
+
+* ---- remote-DMA loopback: write pattern to buffer RAM, read back ----
+		moveq	#NDMAPASS-1,d4
+.d1t1		PrA	<"DMA pass errs: ">
+* fill source buffer: b = i*13+pass*7
+		lea	srcBuf,a0
+		moveq	#0,d1
+		moveq	#NDMA-1,d2
+.d1t2		move.b	d1,d3
+		mulu	#13,d3
+		add.b	d4,d3
+		move.b	d3,(a0)+
+		addq.b	#1,d1
+		dbra	d2,.d1t2
+
+* remote write NDMA bytes to page $40
+		putBUSi	NDMA,EN0_RCNTLO
+		moveq	#0,d1
+		putBUS	d1,EN0_RCNTHI
+		putBUS	d1,EN0_RSARLO
+		putBUSi	$40,EN0_RSARHI
+		putBUSDi	E8390_RWRITE+E8390_START,E8390_CMD
+		lea	srcBuf,a0
+		move	#NDMA,d2
+		RAM2NE	a0,d2
+		putBUSi	E8390_NODMA+E8390_STOP,E8390_CMD
+		putBUSi	ENISR_RDC,EN0_ISR
+
+* remote read back
+		putBUSi	NDMA,EN0_RCNTLO
+		moveq	#0,d1
+		putBUS	d1,EN0_RCNTHI
+		putBUS	d1,EN0_RSARLO
+		putBUSi	$40,EN0_RSARHI
+		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD
+		lea	dstBuf,a0
+		move	#NDMA-1,d2
+		CNOP	2,4
+.d1t3		getBUS	NE_DATAPORT,d1
+		move.b	d1,(a0)+
+		dbra	d2,.d1t3
+		putBUSi	E8390_NODMA+E8390_STOP,E8390_CMD
+		putBUSi	ENISR_RDC,EN0_ISR
+
+* compare
+		moveq	#0,d5
+		lea	srcBuf,a0
+		lea	dstBuf,a1
+		move	#NDMA-1,d2
+.d1t4		cmpm.b	(a0)+,(a1)+
+		beq.b	.d1c1
+		addq.w	#1,d5
+.d1c1		dbra	d2,.d1t4
+		bsr	prErrs
+		dbra	d4,.d1t1
+
+* dump first 16 readback bytes of the last pass for eyeballing
+		PrA	<"last readback: ">
+		lea	dstBuf,a0
+		moveq	#15,d2
+.d2t1		PrB	(a0)+
+		PrA	<" ">
+		dbra	d2,.d2t1
+		PrS	crlf(pc)
+		PrA	<"expected:      ">
+		lea	srcBuf,a0
+		moveq	#15,d2
+.d2t2		PrB	(a0)+
+		PrA	<" ">
+		dbra	d2,.d2t2
+		PrS	crlf(pc)
+
+		cacheOn
+		rts
+
+
+prErrs		move	d5,-(sp)
+		bsr	prntWord
+		addq.l	#2,sp
+		PrS	crlf(pc)
+		rts
+
+patterns	DC.B	$00,$ff,$55,$aa,$01,$02,$04,$08,$10,$20,$40,$47
+crlf		DC.B	13,10,0
+		EVEN
+
+		INCLUDE	UTI.S
+
+		SECTION	BSS
+srcBuf		DS.B	NDMA
+dstBuf		DS.B	NDMA
+
+******** end of HT5ENE.S ********************************************************

@@ -120,6 +120,10 @@ cacheOff	MACRO
 cacheOn		MACRO
 		ENDM
 
+putBUSDi	MACRO			; same as putBUSi on this bus variant
+		putBUSi	\1,\2
+		ENDM
+
 
 
 putBUS		MACRO

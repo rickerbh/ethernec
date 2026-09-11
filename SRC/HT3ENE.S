@@ -127,6 +127,7 @@ test3		jsr	ei_probe1
 		PrA	<"CMD ">
 		getBUS	E8390_CMD,d1
 		PrB	d1
+		putBUS	#E8390_NODMA+E8390_PAGE0+E8390_START,E8390_CMD	; normalise to page 0 (CMD above = as-found)
 		PrA	<" ISR ">
 		getBUS	EN0_ISR,d1
 		PrB	d1
@@ -263,7 +264,7 @@ rtrvPckt
 * we need to skip the 8390 header
 		putBUS	#N8390Hdr,EN0_RSARLO	; skip 8390 header (4)
 		putBUS	RrxReadPg,EN0_RSARHI	; we start at this page
-		putBUS	#E8390_RREAD+E8390_START,E8390_CMD	; go
+		putBUSDi	E8390_RREAD+E8390_START,E8390_CMD	; go
 
 		move.l	RrxPktLen,d1
 		subq.l	#2,d1			; two bytes less we will eat first
