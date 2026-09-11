@@ -71,18 +71,8 @@ myStart		move.l	4(sp),a0		; get pointer to basepage
 NBSA_prom	EQU	32
 
 ne_probe
-	IFD	NOCACHE
-* 68030: the cartridge port lives in cacheable ROM space, so repeated reads of
-* the (fixed-address) data port hit the data cache and never re-read the bus.
-* Disable + clear the data cache for the probe. Runs in super mode (Supexec).
-		movec	CACR,d0
-		move.l	d0,-(sp)		; save CACR
-		bclr	#8,d0			; ED=0 : disable data cache
-		bset	#11,d0			; CD=1 : clear data cache
-		movec	d0,CACR
-	ENDC
 		lockBUSWait			; aquire Bus
-		ldBUSRegs			; prepare registers
+		ldBUSRegs			; prepare registers (also disables the data cache on 030)
 
 		PrS	.head1(pc)
 
@@ -156,12 +146,8 @@ ne_probe
 		PrS	AnyKey(pc)
 		WaitKey
 	ENDC
-		deselBUS			; deselect Bus interface
+		deselBUS			; deselect Bus interface (also re-enables the data cache)
 		unlockBUSWait			; relinquish Bus
-	IFD	NOCACHE
-		move.l	(sp)+,d0
-		movec	d0,CACR			; restore caller's CACR
-	ENDC
 		rts
 
 

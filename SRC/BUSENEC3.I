@@ -79,36 +79,50 @@ RdBUS		EQUR	a6
 
 
 ldBUSRegs	MACRO				; for faster access to hardware
+		cacheDataOff			; keep the cartridge ROM window out of the 68030 data cache
 		lea	rom3,RcBUS
 		lea	rom4,RdBUS
 		ENDM
 
 
 *
-* Per-access recovery delay for fast machines (TT etc.).
+* 68030 data-cache handling for the cartridge port.
 *
-* The cartridge (ISA) cycle length and the gap between consecutive cycles are
-* set by the host bus speed. On the ~32 MHz TT bus these come too close together
-* for the RTL8019AS to service, so remote-DMA reads return stale data (the DMA
-* pointer never advances) and register reads latch unstable bits. This driver
-* is a port of Linux ne.c, which uses paused I/O (inb_p/outb_p); that pause was
-* dropped here on the assumption of a slow ST/Falcon bus.
+* The EtherNEC data/register ports are decoded in the cartridge ROM window
+* ($FA0000/$FB0000). ROM space is cacheable, so on a 68030 (TT, Falcon) the
+* data cache satisfies repeated reads of the fixed data-port address from its
+* first value: the remote-DMA pointer never advances and every read returns the
+* same byte (observed on the TT as a constant $3e MAC). Inter-access delay does
+* not help -- a cache hit ignores timing.
 *
-* RECOVER re-introduces that pause as NE_RECOVER nops after every chip access,
-* widening the gap before the next one. Tune per machine: raise until reads are
-* reliable, then lower for throughput. NE_RECOVER = 0 reproduces the original
-* (no pad). Override at assembly time with vasm -DNE_RECOVER=<n>.
+* Fix: disable the 68030 data cache (CACR bit 8, ED) for each cartridge access
+* block and re-enable it on the way out, bracketed by ldBUSRegs / deselBUS which
+* every driver entry point already calls. This mirrors STinG's Lance driver
+* (cache_off / cache_on). Only the data cache is touched (no driver code lives
+* in the cartridge window, so the instruction cache is left alone) and the cache
+* is never flushed, so the cost is negligible.
 *
-	IFND	NE_RECOVER
-NE_RECOVER	EQU	0
-	ENDC
+* This is the 68020+/030 bus variant, so movec is always legal here; the plain
+* 68000 BUSENEC.I variant has no data cache and needs none of this. d0 is
+* preserved, so the macros are safe to invoke from anywhere.
+*
+CACR_ED		EQU	$0100			; CACR bit 8: Enable Data cache
+CACR_NED	EQU	$feff			; mask to clear ED (low word)
 
-RECOVER		MACRO
-	IFNE	NE_RECOVER
-		REPT	NE_RECOVER
-		nop
-		ENDR
-	ENDC
+cacheDataOff	MACRO
+		move.l	d0,-(sp)
+		movec	CACR,d0
+		and.w	#CACR_NED,d0		; ED = 0 : bypass the data cache
+		movec	d0,CACR
+		move.l	(sp)+,d0
+		ENDM
+
+cacheDataOn	MACRO
+		move.l	d0,-(sp)
+		movec	CACR,d0
+		or.w	#CACR_ED,d0		; ED = 1 : re-enable the data cache
+		movec	d0,CACR
+		move.l	(sp)+,d0
 		ENDM
 
 
@@ -120,13 +134,11 @@ putBUS		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
-		RECOVER
 		ENDM
 
 
 putBUSi		MACRO
 		tst.b	((\2<<8)!(\1))<<1(RcBUS)	; write by reading
-		RECOVER
 		ENDM
 
 
@@ -137,26 +149,23 @@ putMore		MACRO
 	ELSEIF
 		DC.W	$4A35,$7200		; machine code as Genst2 cannot do 68030
 	ENDC
-		RECOVER
 		ENDM
 
 
 getBUS		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
-		RECOVER
 		ENDM
 
 
 getMore		MACRO
 		move.b	(\1)<<9(RdBUS),\2	; read from CP
-		RECOVER
 		ENDM
 
 *
 * macro to deselect an interface
 *
 deselBUS	MACRO
-* empty as the cartridge port does not need deselecting
+		cacheDataOn			; restore the data cache on the way out
 		ENDM
 
 
