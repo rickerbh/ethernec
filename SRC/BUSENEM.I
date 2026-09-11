@@ -75,6 +75,15 @@ ldBUSRegs	MACRO				; for faster access to hardware
 		lea	ISA_BASE+NE_IO_BASE,RcBUS
 		ENDM
 
+* no-op cache handling on this bus variant (68030 cartridge-port cache fix
+* lives in BUSENEC3.I; other buses / plain 68000 need none of it)
+cacheOff	MACRO
+		ENDM
+
+cacheOn		MACRO
+		ENDM
+
+
 
 putBUS		MACRO
 		move.b	\1,(\2)^3(RcBUS)

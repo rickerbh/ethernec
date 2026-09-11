@@ -112,6 +112,15 @@ ldBUSRegs	MACRO				; for faster access to hardware
 ; R_W is only effective in DMA mode. Otherwise state of R_W line reflects direction of move.w
 		ENDM
 
+* no-op cache handling on this bus variant (68030 cartridge-port cache fix
+* lives in BUSENEC3.I; other buses / plain 68000 need none of it)
+cacheOff	MACRO
+		ENDM
+
+cacheOn		MACRO
+		ENDM
+
+
 
 putBUS		MACRO
 		move	Ra1l,(RcBUS)		; A1 gets low

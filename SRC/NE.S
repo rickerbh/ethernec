@@ -188,6 +188,7 @@ Ron		REG	d3-d5/RxBUS/RyBUS/a2-a4/RcBUS/RdBUS
 
 
 ei_open		movem.l	Ron,-(sp)
+		cacheOff			; keep cartridge access out of the 030 data cache
 		lockBUSWait			; aquire Bus
 		ldBUSRegs			; load registers to access Bus
 
@@ -197,6 +198,7 @@ ei_open		movem.l	Ron,-(sp)
 
 		deselBUS			; deselect Bus interface
 		unlockBUSWait			; relinquish Bus
+		cacheOn	d1			; restore caller's cache state
 		moveq	#0,d0
 .doNothing	movem.l	(sp)+,Ron
 		rts
@@ -217,6 +219,7 @@ Rcl		REG	d3-d5/RxBUS/RyBUS/a2-a4/RcBUS/RdBUS
 
 
 ei_close	movem.l	Rcl,-(sp)
+		cacheOff			; keep cartridge access out of the 030 data cache
 		lockBUSWait			; aquire Bus
 		ldBUSRegs			; load registers to access Bus
 
@@ -226,6 +229,7 @@ ei_close	movem.l	Rcl,-(sp)
 
 		deselBUS			; deselect Bus interface
 		unlockBUSWait			; relinquish Bus
+		cacheOn	d1			; restore caller's cache state
 		moveq	#0,d0
 .doNothing	movem.l	(sp)+,Rcl
 		rts
@@ -285,9 +289,11 @@ ei_start_xmit	move.w	d0,d2			; save arg
 		lockBUS				; aquire Bus, jumps to .doNothing
 						; on fail to lock with d0.l=-1
 		movem.l	Rsx,-(sp)
+		cacheOff			; keep cartridge access out of the 030 data cache
+						; (after lockBUS: the fail path must not pop)
 		move.l	a0,a2			; save arg
 	IFGE	TXDEBPRT-3
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" Tx l1: ">
 		PrW	d2
 		PrA	<" l2: ">
@@ -298,7 +304,7 @@ ei_start_xmit	move.w	d0,d2			; save arg
 		tas	DVS+dev_tbusy		; is NE transmitting?
 		beq.b	.c1			; no, go on
 
-		move.l	_hz_200\w,d0		; yes, check how long ago
+		move.l	_hz_200.w,d0		; yes, check how long ago
 		sub.l	DVS+dev_trans_start,d0	; time since start of last xmit
 		cmp.l	#TX_TIMEOUT,d0
 		bls	.TxBusy			; not yet over, leave it alone
@@ -342,10 +348,11 @@ ei_start_xmit	move.w	d0,d2			; save arg
 	IFGE	TXDEBPRT-3
 		PrA	<" start",13,10>
 	ENDC
-		move.l	_hz_200\w,DVS+dev_trans_start	; save tx start time
+		move.l	_hz_200.w,DVS+dev_trans_start	; save tx start time
 		moveq	#0,d0			; rc=OK
 
 .quit		deselBUS			; deselect Bus interface
+		cacheOn	d1			; restore cache state (d0 holds the rc)
 		movem.l	(sp)+,Rsx		; restore used registers
 		unlockBUS			; relinquish Bus
 .doNothing	rts
@@ -389,6 +396,8 @@ Rit		REG	RitInts/RxBUS/RyBUS/RitDVS/RcBUS/RdBUS	; saved registers on entry
 ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 						; on fail to lock with d0.l=-1
 		movem.l	Rit,-(sp)		; save all used registers
+		cacheOff			; keep cartridge access out of the 030 data cache
+						; (after lockBUS: the fail path must not pop)
 		lea	DVS,RitDVS		; allows faster access to global vars.
 		ldBUSRegs			; load registers to access Bus
 
@@ -411,7 +420,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq.b	.c1
 
 	IFGE	RXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" IRxOver ISR: ">
 		PrB	RitInts
 		PrS	crlf(pc)
@@ -424,7 +433,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq	.c11
 
 	IFGE	RXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" IRxRecv ISR: ">
 		PrB	RitInts
 		PrA	<" RSR: ">
@@ -439,7 +448,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq	.c2
 
 	IFGE	RXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" IRxErr  ISR: ">
 		PrB	RitInts
 		PrA	<" RSR: ">
@@ -455,7 +464,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq.b	.c3
 
 	IFGE	TXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" ITxDone ISR: ">
 		PrB	RitInts
 		PrS	crlf(pc)
@@ -468,7 +477,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq.b	.c4
 
 	IFGE	TXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" ITxErr  ISR: ">
 		PrB	RitInts
 		PrS	crlf(pc)
@@ -497,7 +506,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 		beq.b	.c6
 
 	IFGE	RXDEBPRT-4
-		PrL	_hz_200\w
+		PrL	_hz_200.w
 		PrA	<" IRxRDC  ISR: ">
 		PrB	RitInts
 		PrS	crlf(pc)
@@ -506,6 +515,7 @@ ei_interrupt	lockBUS				; aquire Bus, jumps to .doNothing
 
 .c6
 .exit		deselBUS			; deselect Bus interface
+		cacheOn	d1			; restore caller's cache state
 		movem.l	(sp)+,Rit		; restore used registers
 		unlockBUS			; relinquish Bus
 .doNothing	rts
@@ -1024,6 +1034,7 @@ get_stats	movem.l	Rgs,-(sp)
 		lea	DVS,RgsDVS
 		lockBUS				; aquire Bus
 						; jumps to .doNothing on fail to lock
+		cacheOff			; keep cartridge access out of the 030 data cache
 		ldBUSRegs			; load registers to access Bus
 
 		tst.b	dev_start(RgsDVS)	; device active?
@@ -1042,6 +1053,7 @@ get_stats	movem.l	Rgs,-(sp)
 		add	d0,lcl_es_rx_missed_errors(RgsDVS)
 	
 .c1		deselBUS			; deselect Bus interface
+		cacheOn	d1			; restore caller's cache state
 		unlockBUS			; relinquish Bus
 .doNothing	move.l	#DVS+lcl_stats,d0	; OK
 		movem.l	(sp)+,Rgs		; restore used registers
@@ -1190,7 +1202,7 @@ NS8390_init	move	d0,-(sp)		; save argument "startp"
 * out:
 *	d0 time left in processor specific units
 
-ADelay		lea	_hz_200\w,a0
+ADelay		lea	_hz_200.w,a0
 		add.l	(a0),d1			; time to quit at
 
 .t1		subq.l	#1,d0			; time has come?
@@ -1233,6 +1245,8 @@ Rpr		REG	RxBUS/RyBUS/RprDVS/RcBUS/RdBUS
 
 ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 		lea	DVS,RprDVS		; allows faster access to global vars.
+		cacheOff			; keep cartridge access out of the 030 data cache
+						; (before Alloc: sp-relative local offsets must not shift)
 		Alloc	pbNLcl			; allocate locals vars
 		move	#2,pbWordLen(sp)
 		lockBUSWait			; aquire Bus
@@ -1252,7 +1266,7 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 
 *		move.l	ticks2ms(RprDVS),d0	; wait 2ms
 		moveq	#2,d1			; wait 5-10ms maximum
-		bsr.b	ADelay
+		bsr	ADelay			; (was bsr.b; RECOVER pads pushed it out of byte range)
 
 		getBUS	EN0_ISR,d1		; read isr
 		and.b	#ENISR_RESET,d1		; test for reset bit
@@ -1373,6 +1387,7 @@ ei_probe1	movem.l	Rpr,-(sp)		; save used regs
 .quit		deselBUS			; deselect Bus interface
 		unlockBUSWait			; relinquish Bus
 .doNothing	deAlloc	pbNLcl			; pop local vars
+		cacheOn	d1			; restore cache state (d0 holds the rc)
 		movem.l	(sp)+,Rpr		; restore regs
 		rts
 

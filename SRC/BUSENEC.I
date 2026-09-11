@@ -81,6 +81,15 @@ ldBUSRegs	MACRO				; for faster access to hardware
 		lea	rom4,RdBUS
 		ENDM
 
+* no-op cache handling on this bus variant (68030 cartridge-port cache fix
+* lives in BUSENEC3.I; other buses / plain 68000 need none of it)
+cacheOff	MACRO
+		ENDM
+
+cacheOn		MACRO
+		ENDM
+
+
 
 putBUS		MACRO
 		move.w	#(\2)<<8,RyBUS		; move ISA address to bits 8-15

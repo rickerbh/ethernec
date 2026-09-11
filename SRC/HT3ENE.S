@@ -49,6 +49,7 @@ N8390Hdr	EQU	4		; the 8390 chip stores a 4 byte header preceeding the packet
 myStart		move.l	4(sp),a0		; get pointer to basepage
 		move.l	$18(a0),d0		; get start of BSS
 		add.l	$1c(a0),d0		; +BSS length=points beyond BSS
+		add.l	#512,d0			; +stack (tlink added this via -s; vlink does not)
 		move.l	d0,sp			; here starts our stack
 		sub.l	a0,d0			; =total length
 		move.l	d0,-(sp)		; reserve this much memory
@@ -187,8 +188,7 @@ test3		jsr	ei_probe1
 
 
 
-tstPacket	DC.B	$00,$60,$97,$97,$93,$ff
-;;;		DC.B	$ff,$ff,$ff,$ff,$ff,$ff
+tstPacket	DC.B	$ff,$ff,$ff,$ff,$ff,$ff	; broadcast, visible in a LAN sniffer
 		DC.B	$00,$00,$21,$23,$34,$87
 		DC.W	$0800
 		DS.B	100

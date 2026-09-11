@@ -132,9 +132,16 @@ cacheOff	MACRO
 		movec	d0,CACR
 		ENDM
 
+* cacheOn restores the CACR saved by cacheOff. Optional argument: scratch data
+* register to use instead of d0 (for exit paths where d0 holds the return code).
 cacheOn		MACRO
+	IFEQ	NARG
 		move.l	(sp)+,d0
 		movec	d0,CACR			; restore caller's CACR
+	ELSEIF
+		move.l	(sp)+,\1
+		movec	\1,CACR			; restore caller's CACR
+	ENDC
 		ENDM
 
 
